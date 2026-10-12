@@ -202,7 +202,7 @@ h3.sub{font-size:14px;margin:16px 0 8px}
   <!-- الموردين -->
   <section class="tab" id="t-suppliers">
     <div class="card" style="margin-bottom:14px">
-      <h2>مستحقات الموردين <small>(اللي لسه عليك تدفعه — حسب الفلتر — اضغط على المورد لكشف حسابه الكامل)</small></h2>
+      <h2>مستحقات الموردين <small>(اللي لسه عليك تدفعه — على كل الفترات — اضغط على المورد لكشف حسابه)</small></h2>
       <div class="tw"><table id="supDebtT"></table></div>
     </div>
     <div class="card" id="supDetail" style="display:none;margin-bottom:14px"></div>
@@ -235,6 +235,8 @@ const LIMIT_WARN_PCT = 80;        // تنبيه مبكر لما العميل ي�
 let SALES=[],PAYS=[],SUPPAYS=[],NAMES={},SHEETLIM={},charts={},sortKey='debt',sortDir=-1,DEMO=false,CUR=null,LASTLIST=[];
 const $=id=>document.getElementById(id);
 const fmt=n=>isFinite(n)?Math.round(n).toLocaleString('en-US'):'0';
+const r6=n=>Math.round((+n||0)*1e6)/1e6; // يشيل أخطاء الجمع العشري بدون تقريب فعلي
+const fq=n=>isFinite(n)?r6(n).toLocaleString('en-US',{maximumFractionDigits:6}):'0'; // الكمية بالظبط
 const fc=new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1});
 const esc=t=>String(t==null?'':t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dd=d=>d?d.toLocaleDateString('en-GB'):'';
@@ -422,7 +424,7 @@ function render(){
     kpi('إجمالي المبيعات',fmt(sale),'💰','var(--bl)',prev?delta(sale,pSale):'')+
     kpi('صافي المكسب',`<span class="g">${fmt(pr)}</span>`,'📈','var(--gr)',prev?delta(pr,pPr):'')+
     kpi('هامش المكسب',(sale?pr/sale*100:0).toFixed(1)+'%','🎯','var(--pr)')+
-    kpi('إجمالي الكمية',fmt(qty),'⚖️','var(--or)',prev?delta(qty,pQty):'');
+    kpi('إجمالي الكمية',fq(qty),'⚖️','var(--or)',prev?delta(qty,pQty):'');
   $('kpiSm').innerHTML=[
     ['عدد العمليات',fmt(d.length),'🧾','var(--mu)'],['إجمالي المشتريات',fmt(buy),'🛒','var(--or)'],['إجمالي النولون',fmt(frt),'🚚','var(--or)'],
     ['متوسط المكسب/طن',fmt(qty?pr/qty:0),'🏷️','var(--gr)'],['متوسط المكسب/عملية',fmt(d.length?pr/d.length:0),'📊','var(--gr)'],
@@ -460,10 +462,11 @@ function render(){
   chart('c6','doughnut',['المشتريات','النولون',pr>=0?'المكسب':'الخسارة'],[{data:[buy,frt,Math.abs(pr)],backgroundColor:['#fbbf24','#f87171',pr>=0?'#34d399':'#7f1d1d'],borderWidth:0}]);
 
   const total=(arr,f)=>fmt(sum(arr,f));
-  tbl('supT',['المورد','العمليات','الكمية','المشتريات','متوسط السعر/طن'],sk.map(k=>[esc(k),sp[k].length,fmt(sum(sp[k],x=>x.qty)),total(sp[k],x=>x.buy),fmt(sum(sp[k],x=>x.buy)/(sum(sp[k],x=>x.qty)||1))]));
-  tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fmt(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]));
+  tbl('supT',['المورد','العمليات','الكمية','المشتريات','متوسط السعر/طن'],sk.map(k=>[esc(k),sp[k].length,fq(sum(sp[k],x=>x.qty)),total(sp[k],x=>x.buy),fmt(sum(sp[k],x=>x.buy)/(sum(sp[k],x=>x.qty)||1))]));
+  tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fq(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]));
   tbl('prjT',['المشروع','العمليات','المبيعات','المكسب','الهامش'],pk.map(k=>{const s=sum(pj[k],x=>x.sale),p=sum(pj[k],x=>x.profit);return[esc(k),pj[k].length,fmt(s),`<span class="${p>=0?'g':'r'}">${fmt(p)}</span>`,(s?p/s*100:0).toFixed(1)+'%']}));
   renderDebt();renderSupDebt();
+  if(CURS&&$('supDetail').style.display==='block')showSupplier(CURS.sup,true); // يحدّث كشف المورد المفتوح لما الفلتر يتغير
 }
 
 function themeChart(){
@@ -480,7 +483,7 @@ function chart(id,type,labels,datasets,o){
   const cat={grid:{display:false}};
   const opt={responsive:true,maintainAspectRatio:false,indexAxis:o.horiz?'y':'x',
     plugins:{legend:{display:datasets.length>1||type=='doughnut',position:'bottom',labels:{usePointStyle:true,boxWidth:8}},
-      tooltip:{rtl:true,textDirection:'rtl',callbacks:{label:c=>' '+(c.dataset.label?c.dataset.label+': ':c.label+': ')+fmt(c.raw)}}}};
+      tooltip:{rtl:true,textDirection:'rtl',callbacks:{label:c=>' '+(c.dataset.label?c.dataset.label+': ':c.label+': ')+(c.dataset.label=='الكمية'?fq(c.raw):fmt(c.raw))}}}};
   if(type!='doughnut'){
     if(o.dual)opt.scales={x:cat,y:{...val,position:'left'},y1:{...val,position:'right',grid:{drawOnChartArea:false}}};
     else opt.scales=o.horiz?{x:val,y:cat}:{x:cat,y:val};
@@ -494,33 +497,15 @@ function tbl(id,heads,rows,foot){
 }
 
 /* ====== مستحقات الموردين ====== */
-function supList(useFilter){
+function supList(){
   const m={},mk=k=>m[k]=m[k]||{sup:k,total:0,paid:0,n:0};
-  if(!useFilter){                       // الإجمالي الكلي (بيستخدمه كارت "مستحق للموردين" في نظرة عامة)
-    SALES.forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.n++});
-    SUPPAYS.forEach(x=>{mk(x.sup||'غير محدد').paid+=x.amt});
-    return Object.values(m).map(c=>({...c,debt:c.total-c.paid}));
-  }
-  const {f,t}=rng(),p=$('fProj').value,s=$('fSup').value;
-  // المشتريات: بنفس فلتر التاريخ والمشروع والمورد
-  select(f,t).forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.n++});
-  // نسبة مشتريات المشروع من إجمالي مشتريات كل مورد (لتوزيع الدفعات لأن دفعات الموردين مش مربوطة بمشروع)
-  const share={};
-  if(p){const all={},inP={};
-    SALES.forEach(x=>{const k=x.sup||'غير محدد';all[k]=(all[k]||0)+x.buy;if(x.proj==p)inP[k]=(inP[k]||0)+x.buy});
-    Object.keys(all).forEach(k=>share[k]=all[k]?(inP[k]||0)/all[k]:0)}
-  // الدفعات: بنفس فلتر التاريخ والمورد
-  SUPPAYS.forEach(x=>{const k=x.sup||'غير محدد';
-    if(s&&k!=s)return;
-    if(f&&!(x.date&&x.date>=f))return;
-    if(t&&!(x.date&&x.date<t))return;
-    const a=p?x.amt*(share[k]||0):x.amt;
-    if(a>0)mk(k).paid+=a});
-  return Object.values(m).filter(c=>c.total||c.paid).map(c=>({...c,debt:c.total-c.paid}));
+  SALES.forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.n++});
+  SUPPAYS.forEach(x=>{mk(x.sup||'غير محدد').paid+=x.amt});
+  return Object.values(m).map(c=>({...c,debt:c.total-c.paid}));
 }
 function renderSupDebt(){
-  const a=supList(true).sort((x,y)=>y.debt-x.debt);
-  if(!a.length){$('supDebtT').innerHTML='<tbody><tr><td class="empty">لا توجد بيانات في الفترة المحددة</td></tr></tbody>';return}
+  const a=supList().sort((x,y)=>y.debt-x.debt);
+  if(!a.length){$('supDebtT').innerHTML='<tbody><tr><td class="empty">لا توجد بيانات</td></tr></tbody>';return}
   $('supDebtT').innerHTML='<thead><tr><th>المورد</th><th>العمليات</th><th>إجمالي المشتريات</th><th>المدفوع له</th><th>المتبقي له (علينا)</th><th>نسبة السداد</th></tr></thead><tbody>'+
    a.map(x=>{const pc=x.total?Math.min(100,x.paid/x.total*100):0,bad=x.total==0&&x.paid>0;
     return `<tr class="cl" data-sup="${esc(x.sup)}"><td><b>${esc(x.sup)}</b>${bad?' <span class="badge b-o">اسم غير مسجل في المشتريات</span>':''}</td><td>${x.n}</td><td>${fmt(x.total)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'o':'g'}"><b>${fmt(x.debt)}</b></td><td><div class="bar"><i style="width:${pc}%"></i></div>${pc.toFixed(0)}%</td></tr>`}).join('')+
@@ -576,12 +561,12 @@ function debtList(){
     const open=r.inv.filter(i=>i.rem>0.5),dated=open.filter(i=>i.age!=null);
     const b=[0,0,0,0];open.forEach(i=>{const a=i.age==null?0:i.age;b[a<=30?0:a<=60?1:a<=90?2:3]+=i.rem});
     const limit=limitOf(pk),over=limit>0&&debt>limit+0.5,util=limit>0?debt/limit*100:0;
-    out.push({pk,client:NAMES[pk]||pk,phone:pk.startsWith('N:')?'':pk,total,adv,pay,paid,debt,pct:total?paid/total*100:0,
+    out.push({pk,client:NAMES[pk]||pk,phone:pk.startsWith('N:')?'':pk,total,qty:sum(sl,x=>x.qty),adv,pay,paid,debt,pct:total?paid/total*100:0,
       last,lastTs:last?+last:0,age:dated.length?Math.max(...dated.map(i=>i.age)):0,hasAge:dated.length>0,b,inv:r.inv,credit:r.credit,
       limit,over,util,near:limit>0&&!over&&debt>0&&util>=LIMIT_WARN_PCT,unknown:false});
   });
   if(!p&&!s)Object.keys(PB).forEach(pk=>{if(SB[pk])return;const pay=sum(PB[pk],x=>x.amt);
-    out.push({pk,client:'⚠️ رقم غير مسجل في المبيعات',phone:pk,total:0,adv:0,pay,paid:pay,debt:-pay,pct:0,last:null,lastTs:0,age:0,hasAge:false,
+    out.push({pk,client:'⚠️ رقم غير مسجل في المبيعات',phone:pk,total:0,qty:0,adv:0,pay,paid:pay,debt:-pay,pct:0,last:null,lastTs:0,age:0,hasAge:false,
       b:[0,0,0,0],inv:[],credit:pay,limit:0,over:false,util:0,near:false,unknown:true})});
   return out;
 }
@@ -606,6 +591,7 @@ function renderDebt(){
   $('kpiDebt').innerHTML=[
     ['إجمالي المديونية',`<span class="r">${fmt(sum(debtors,x=>x.debt))}</span>`,'⏳','var(--rd)'],
     ['عدد العملاء المدينين',debtors.length,'👥','var(--pr)'],
+    ['إجمالي الكمية',fq(sum(all,x=>x.qty)),'⚖️','var(--or)'],
     ['إجمالي المحصّل',`<span class="g">${fmt(sum(all,x=>x.paid))}</span>`,'✅','var(--gr)'],
     ['نسبة التحصيل',(sum(all,x=>x.total)?sum(all,x=>x.paid)/sum(all,x=>x.total)*100:0).toFixed(0)+'%','🎯','var(--bl)'],
     ['عملاء تعدّوا الحد الائتماني',`<span class="${overL.length?'r':'g'}">${overL.length}</span> <small style="font-size:12px;color:var(--mu)">(زيادة ${fmt(sum(overL,x=>x.debt-x.limit))})</small>`,'🚨',overL.length?'var(--rd)':'var(--gr)']
@@ -616,22 +602,22 @@ function renderDebt(){
     ['ديون عمرها 61–90 يوم',`<span class="o">${fmt(bk[2])}</span>`,'🟠','var(--or)'],['ديون أقدم من 90 يوم',`<span class="r">${fmt(bk[3])}</span>`,'🔴','var(--rd)'],
     [`فواتير أقدم من ${AGE_BAD} يوم`,`<span class="r">${fmt(oldAmt)}</span> <small style="font-size:12px;color:var(--mu)">(${oldN} عميل)</small>`,'🚨','var(--rd)']
   ].map(x=>kpi(...x)).join('');
-  const H=[['client','العميل'],['phone','التليفون'],['total','إجمالي المشتريات'],['paid','المدفوع'],['debt','المتبقي (المديونية)'],['limit','الحد الائتماني'],['util','استخدام الحد'],['pct','نسبة السداد'],['lastTs','آخر عملية بيع'],['age','عمر أقدم فاتورة مفتوحة (FIFO)']];
+  const H=[['client','العميل'],['phone','التليفون'],['total','إجمالي المبيعات'],['qty','الكمية'],['paid','المدفوع'],['debt','المتبقي (المديونية)'],['limit','الحد الائتماني'],['util','استخدام الحد'],['pct','نسبة السداد'],['lastTs','آخر عملية بيع'],['age','عمر أقدم فاتورة مفتوحة (FIFO)']];
   $('debtT').innerHTML='<thead><tr>'+H.map(([k,t])=>`<th class="s" data-k="${k}">${t}${sortKey==k?(sortDir>0?' ▲':' ▼'):''}</th>`).join('')+'<th>إجراءات</th></tr></thead><tbody>'+
    (a.length?a.map(x=>{
     const wa=/^01\d{9}$/.test(x.phone)&&x.debt>0.5?`<a class="wa" target="_blank" rel="noopener" onclick="event.stopPropagation()" href="https://wa.me/20${x.phone.slice(1)}?text=${encodeURIComponent('السلام عليكم '+x.client+'، بنفكّر حضرتك بالمبلغ المتبقي '+fmt(x.debt)+' جنيه. شكرًا لتعاونكم.')}">واتساب</a>`:'';
     const lb=x.unknown?'':`<button class="ghost sm" data-lim="${esc(x.pk)}" title="تعديل الحد الائتماني">✏️ الحد</button>`;
     const limC=x.limit>0?fmt(x.limit)+(x.over?` <span class="badge b-r">تعدّى بـ ${fmt(x.debt-x.limit)}</span>`:x.near?' <span class="badge b-o">قرب من الحد</span>':''):'<span style="color:var(--mu)">—</span>';
     const utilC=x.limit>0?`<div class="bar"><i style="width:${Math.min(100,x.util)}%;background:${x.over?'var(--rd)':x.near?'var(--or)':'var(--gr)'}"></i></div>${x.util.toFixed(0)}%`:'—';
-    return `<tr class="cl${x.over?' over':''}" data-pk="${esc(x.pk)}"><td><b>${esc(x.client)}</b></td><td dir="ltr" style="text-align:right">${esc(x.phone)}</td><td>${fmt(x.total)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'r':'g'}"><b>${fmt(x.debt)}</b></td><td>${limC}</td><td>${utilC}</td><td><div class="bar"><i style="width:${Math.min(100,x.pct)}%"></i></div>${x.pct.toFixed(0)}%</td><td>${dd(x.last)}</td><td>${ageBadge(x)}</td><td style="display:flex;gap:6px">${lb}${wa}</td></tr>`}).join('')
-   :'<tr><td colspan="11" class="empty">لا يوجد عملاء مطابقين</td></tr>')+
-   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="r">${fmt(sum(a,x=>x.debt))}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tfoot>`;
+    return `<tr class="cl${x.over?' over':''}" data-pk="${esc(x.pk)}"><td><b>${esc(x.client)}</b></td><td dir="ltr" style="text-align:right">${esc(x.phone)}</td><td>${fmt(x.total)}</td><td>${fq(x.qty)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'r':'g'}"><b>${fmt(x.debt)}</b></td><td>${limC}</td><td>${utilC}</td><td><div class="bar"><i style="width:${Math.min(100,x.pct)}%"></i></div>${x.pct.toFixed(0)}%</td><td>${dd(x.last)}</td><td>${ageBadge(x)}</td><td style="display:flex;gap:6px">${lb}${wa}</td></tr>`}).join('')
+   :'<tr><td colspan="12" class="empty">لا يوجد عملاء مطابقين</td></tr>')+
+   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="r">${fmt(sum(a,x=>x.debt))}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tfoot>`;
 }
 function exportDebts(){
   if(typeof XLSX==='undefined'){alert('مكتبة Excel مش اتحملت — اتأكد من الاتصال بالإنترنت وحدّث الصفحة.');return}
-  const aoa=[['العميل','التليفون','إجمالي المشتريات','المدفوع','المتبقي','الحد الائتماني','استخدام الحد %','تعدّى الحد؟','نسبة السداد %','آخر عملية بيع','عمر أقدم فاتورة مفتوحة (يوم)','0-30','31-60','61-90','+90'],
-    ...LASTLIST.map(x=>[x.client,x.phone,Math.round(x.total),Math.round(x.paid),Math.round(x.debt),x.limit||'',x.limit?Math.round(x.util):'',x.over?'نعم':'',Math.round(x.pct),iso(x.last),x.debt>0.5&&x.hasAge?x.age:'',...x.b.map(Math.round)])];
-  const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:26},{wch:15},{wch:16},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:12},{wch:14},{wch:18},{wch:12},{wch:12},{wch:12},{wch:12}];
+  const aoa=[['العميل','التليفون','إجمالي المبيعات','الكمية','المدفوع','المتبقي','الحد الائتماني','استخدام الحد %','تعدّى الحد؟','نسبة السداد %','آخر عملية بيع','عمر أقدم فاتورة مفتوحة (يوم)','0-30','31-60','61-90','+90'],
+    ...LASTLIST.map(x=>[x.client,x.phone,Math.round(x.total),r6(x.qty),Math.round(x.paid),Math.round(x.debt),x.limit||'',x.limit?Math.round(x.util):'',x.over?'نعم':'',Math.round(x.pct),iso(x.last),x.debt>0.5&&x.hasAge?x.age:'',...x.b.map(Math.round)])];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:26},{wch:15},{wch:16},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:12},{wch:14},{wch:18},{wch:12},{wch:12},{wch:12},{wch:12}];
   const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};XLSX.utils.book_append_sheet(wb,ws,'المديونيات');
   XLSX.writeFile(wb,'مديونيات_العملاء_'+iso(new Date())+'.xlsx');
 }
@@ -665,7 +651,7 @@ function stmtData(pk){
             ...pl.map(x=>({d:x.date,t:'سداد',ref:x.inv?'← #'+x.inv:'',n:x.note,q:'',sale:0,paid:x.amt}))].sort((a,b)=>(a.d||0)-(b.d||0));
   let bal=0;ev.forEach(e=>{bal+=e.sale-e.paid;e.bal=bal});
   const r=fifo(sl,pl),limit=limitOf(pk),debt=bal;
-  return {pk,name,phone:pk.startsWith('N:')?'':pk,ev,inv:r.inv,credit:r.credit,total:sum(ev,e=>e.sale),paid:sum(ev,e=>e.paid),debt,
+  return {pk,name,phone:pk.startsWith('N:')?'':pk,ev,inv:r.inv,credit:r.credit,total:sum(ev,e=>e.sale),qty:sum(sl,x=>x.qty),paid:sum(ev,e=>e.paid),debt,
     limit,over:limit>0&&debt>limit+0.5};
 }
 const stBadge=i=>`<span class="badge ${i.status=='مسددة'?'b-g':i.status=='جزئي'?'b-o':'b-r'}">${i.status}</span>`;
@@ -679,15 +665,15 @@ function showClient(pk){
       <button class="sm" style="background:#16a34a" onclick="exportXlsx()">📊 Excel</button>
       <button class="sm" style="background:#dc2626" onclick="exportPdf()">📄 PDF</button>
       <button class="sm ghost" onclick="$('detail').style.display='none'">إغلاق</button></span></h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${lim}${c.credit>0.5?` <span class="chip">رصيد دائن (مدفوع زيادة): <b>${fmt(c.credit)}</b></span>`:''}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${lim}<span class="chip">إجمالي الكمية: <b>${fq(c.qty)}</b></span>${c.credit>0.5?` <span class="chip">رصيد دائن (مدفوع زيادة): <b>${fmt(c.credit)}</b></span>`:''}</div>
     <h3 class="sub">الفواتير وحالة سدادها <small style="color:var(--mu);font-weight:400">(الدفعات بتتوزع على الأقدم أولًا، أو على الفاتورة المربوطة بالدفعة) — الجزء ده مش بيظهر في ملفات التحميل</small></h3>
     <div class="tw"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المشروع</th><th>الكمية</th><th>قيمة الفاتورة</th><th>المسدد</th><th>المتبقي</th><th>العمر</th><th>الحالة</th></tr></thead><tbody>`+
-   (c.inv.length?c.inv.map(i=>`<tr><td>#${i.rn}</td><td>${dd(i.date)}</td><td>${esc(i.proj)}</td><td>${i.qty?fmt(i.qty):''}</td><td>${fmt(i.amount)}</td><td class="g">${fmt(i.paid)}</td><td class="${i.rem>0.5?'r':'g'}">${fmt(i.rem)}</td><td>${i.rem>0.5&&i.age!=null?`<span class="badge ${ageCls(i.age)}">${i.age} يوم</span>`:''}</td><td>${stBadge(i)}</td></tr>`).join(''):'<tr><td colspan="9" class="empty">لا توجد فواتير</td></tr>')+
+   (c.inv.length?c.inv.map(i=>`<tr><td>#${i.rn}</td><td>${dd(i.date)}</td><td>${esc(i.proj)}</td><td>${i.qty?fq(i.qty):''}</td><td>${fmt(i.amount)}</td><td class="g">${fmt(i.paid)}</td><td class="${i.rem>0.5?'r':'g'}">${fmt(i.rem)}</td><td>${i.rem>0.5&&i.age!=null?`<span class="badge ${ageCls(i.age)}">${i.age} يوم</span>`:''}</td><td>${stBadge(i)}</td></tr>`).join(''):'<tr><td colspan="9" class="empty">لا توجد فواتير</td></tr>')+
    `</tbody></table></div>
     <h3 class="sub">حركة الحساب</h3>
     <div class="tw"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>الفاتورة</th><th>بيان</th><th>الكمية</th><th>عليه</th><th>له (مدفوع)</th><th>الرصيد</th></tr></thead><tbody>`+
-   c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${e.ref}</td><td>${esc(e.n)}</td><td>${e.q?fmt(e.q):''}</td><td>${e.sale?fmt(e.sale):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'r':'g'}">${fmt(e.bal)}</td></tr>`).join('')+
-   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td></td><td></td><td></td><td>${fmt(c.total)}</td><td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'r':'g'}">${fmt(c.debt)}</td></tr></tfoot></table></div>`;
+   c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${e.ref}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.sale?fmt(e.sale):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'r':'g'}">${fmt(e.bal)}</td></tr>`).join('')+
+   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td></td><td></td><td>${fq(c.qty)}</td><td>${fmt(c.total)}</td><td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'r':'g'}">${fmt(c.debt)}</td></tr></tfoot></table></div>`;
   D.scrollIntoView({behavior:'smooth'});
 }
 function exportXlsx(){
@@ -695,60 +681,74 @@ function exportXlsx(){
   saveXlsx([['كشف الحساب',[['كشف حساب عميل'],['اسم العميل',c.name],['رقم التليفون',c.phone],['تاريخ الاستخراج',iso(new Date())],[],
     ['التاريخ','النوع','البيان','الكمية','عليه','له (مدفوع)','الرصيد'],
     ...c.ev.map(e=>[iso(e.d),e.t,e.n,e.q===''?'':e.q,e.sale||'',e.paid||'',Math.round(e.bal*100)/100]),
-    [],['الإجمالي','','','',c.total,c.paid,c.debt]],[14,14,26,10,16,16,16]]],'كشف_حساب_'+c.name+'_'+c.phone+'.xlsx');
+    [],['الإجمالي','','',r6(c.qty),c.total,c.paid,c.debt]],[14,14,26,10,16,16,16]]],'كشف_حساب_'+c.name+'_'+c.phone+'.xlsx');
 }
 function exportPdf(){
   if(!CUR)return;const c=CUR,f=n=>Math.round(n).toLocaleString('en-US');
   printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>كشف حساب - ${esc(c.name)}</title><style>${PDF_CSS}</style></head><body>
   <h1>كشف حساب عميل</h1>
   <p class="meta">الاسم: <b>${esc(c.name)}</b><br>رقم التليفون: <b dir="ltr">${esc(c.phone)}</b><br>تاريخ الاستخراج: ${dd(new Date())}</p>
-  <div class="box"><div>إجمالي المشتريات<b>${f(c.total)}</b></div><div>إجمالي المدفوع<b class="g">${f(c.paid)}</b></div><div>المتبقي (المديونية)<b class="${c.debt>0.5?'r':'g'}">${f(c.debt)}</b></div></div>
+  <div class="box"><div>إجمالي المبيعات<b>${f(c.total)}</b></div><div>إجمالي الكمية<b>${fq(c.qty)}</b></div><div>إجمالي المدفوع<b class="g">${f(c.paid)}</b></div><div>المتبقي (المديونية)<b class="${c.debt>0.5?'r':'g'}">${f(c.debt)}</b></div></div>
   <table><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>الكمية</th><th>عليه</th><th>له (مدفوع)</th><th>الرصيد</th></tr>
-  ${c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?f(e.q):''}</td><td>${e.sale?f(e.sale):''}</td><td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td></tr>`).join('')}
-  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td></td><td>${f(c.total)}</td><td>${f(c.paid)}</td><td>${f(c.debt)}</td></tr></table></body></html>`);
+  ${c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.sale?f(e.sale):''}</td><td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td></tr>`).join('')}
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td>${f(c.total)}</td><td>${f(c.paid)}</td><td>${f(c.debt)}</td></tr></table></body></html>`);
 }
 
 /* ====== كشف حساب المورد ====== */
 let CURS=null;
+// لو فيه فلتر مشروع: الكشف بيعرض مشتريات المشروع ده بس. دفعات المورد مش مربوطة بمشروع في الشيت فمش بتظهر مع الفلتر.
 function supStmt(sup){
-  const nm=x=>x.sup||'غير محدد';
-  const pu=SALES.filter(x=>nm(x)==sup),pa=SUPPAYS.filter(x=>nm(x)==sup);
+  const nm=x=>x.sup||'غير محدد',proj=$('fProj').value;
+  const pu=SALES.filter(x=>nm(x)==sup&&(!proj||x.proj==proj)),pa=proj?[]:SUPPAYS.filter(x=>nm(x)==sup);
   const ev=[...pu.map(x=>({d:x.date,t:'مشتريات',n:[x.proj,x.client].filter(Boolean).join(' — '),q:x.qty||'',price:PRICE_PER_TON?x.unitBuy:'',buy:x.buy,paid:0})),
             ...pa.map(x=>({d:x.date,t:'دفعة للمورد',n:x.note,q:'',price:'',buy:0,paid:x.amt}))].sort((a,b)=>(a.d||0)-(b.d||0));
   let bal=0;ev.forEach(e=>{bal+=e.buy-e.paid;e.bal=bal});
-  return {sup,ev,total:sum(ev,e=>e.buy),paid:sum(ev,e=>e.paid),debt:bal,qty:sum(pu,x=>x.qty)};
+  return {sup,proj,ev,total:sum(ev,e=>e.buy),paid:sum(ev,e=>e.paid),debt:bal,qty:sum(pu,x=>x.qty)};
 }
-function showSupplier(sup){
-  CURS=supStmt(sup);const c=CURS,D=$('supDetail');
+function showSupplier(sup,quiet){
+  CURS=supStmt(sup);const c=CURS,D=$('supDetail'),P=!!c.proj;
   D.style.display='block';
+  const kp=P?[['مشتريات المشروع',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)']]
+            :[['إجمالي المشتريات',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)'],['المدفوع له',`<span class="g">${fmt(c.paid)}</span>`,'✅','var(--gr)'],['المتبقي له (علينا)',`<span class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</span>`,'⏳',c.debt>0.5?'var(--or)':'var(--gr)']];
+  const note=P?`<div style="margin:8px 0"><span class="chip">مفلتر على مشروع: <b>${esc(c.proj)}</b></span> <small style="color:var(--mu)">— الكشف ده فيه مشتريات المشروع ده بس. دفعات المورد مش مربوطة بمشروع في الشيت فمش ظاهرة هنا؛ المدفوع والمتبقي بيظهروا لما تختار «الكل» في فلتر المشروع.</small></div>`:'';
+  const head=P?'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th>'
+              :'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
+  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?fmt(e.price):''}</td><td>${e.buy?fmt(e.buy):''}</td>`+(P?'':`<td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'o':'g'}">${fmt(e.bal)}</td>`)+'</tr>';
+  const foot=`<tr><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${fmt(c.total)}</td>`+(P?'':`<td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</td>`)+'</tr>';
   D.innerHTML=`<h2>كشف حساب مورد: ${esc(c.sup)}
     <span style="margin-inline-start:auto;display:flex;gap:6px;flex-wrap:wrap">
       <button class="sm" style="background:#16a34a" onclick="exportSupXlsx()">📊 Excel</button>
       <button class="sm" style="background:#dc2626" onclick="exportSupPdf()">📄 PDF</button>
       <button class="sm ghost" onclick="$('supDetail').style.display='none'">إغلاق</button></span></h2>
-    <div class="kpis sm">${[['إجمالي المشتريات',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fmt(c.qty),'⚖️','var(--bl)'],['المدفوع له',`<span class="g">${fmt(c.paid)}</span>`,'✅','var(--gr)'],['المتبقي له (علينا)',`<span class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</span>`,'⏳',c.debt>0.5?'var(--or)':'var(--gr)']].map(x=>kpi(...x)).join('')}</div>
-    <div class="tw"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th></tr></thead><tbody>`+
-   c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fmt(e.q):''}</td><td>${e.price?fmt(e.price):''}</td><td>${e.buy?fmt(e.buy):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'o':'g'}">${fmt(e.bal)}</td></tr>`).join('')+
-   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td></td><td>${fmt(c.qty)}</td><td></td><td>${fmt(c.total)}</td><td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</td></tr></tfoot></table></div>`;
-  D.scrollIntoView({behavior:'smooth'});
+    ${note}
+    <div class="kpis sm">${kp.map(x=>kpi(...x)).join('')}</div>
+    <div class="tw"><table><thead><tr>${head}</tr></thead><tbody>${c.ev.map(row).join('')}</tbody><tfoot>${foot}</tfoot></table></div>`;
+  if(!quiet)D.scrollIntoView({behavior:'smooth'});
 }
 function exportSupXlsx(){
-  if(!CURS||noXlsx())return;const c=CURS;
-  saveXlsx([['كشف حساب المورد',[['كشف حساب مورد'],['اسم المورد',c.sup],['تاريخ الاستخراج',iso(new Date())],[],
-    ['التاريخ','النوع','المشروع — العميل','الكمية','سعر الشراء/طن','مشتريات (علينا)','مدفوع له','المتبقي'],
-    ...c.ev.map(e=>[iso(e.d),e.t,e.n,e.q===''?'':e.q,e.price||'',e.buy||'',e.paid||'',Math.round(e.bal*100)/100]),
-    [],['الإجمالي','','',c.qty,'',c.total,c.paid,c.debt]],[14,14,28,10,14,16,16,16]]],'كشف_حساب_مورد_'+c.sup+'.xlsx');
+  if(!CURS||noXlsx())return;const c=CURS,P=!!c.proj,cut=r=>P?r.slice(0,6):r;
+  saveXlsx([['كشف حساب المورد',[['كشف حساب مورد'],['اسم المورد',c.sup],...(P?[['المشروع',c.proj],['ملاحظة','مشتريات المشروع فقط — دفعات المورد مش مربوطة بمشروع']]:[]),['تاريخ الاستخراج',iso(new Date())],[],
+    cut(['التاريخ','النوع','المشروع — العميل','الكمية','سعر الشراء/طن','مشتريات (علينا)','مدفوع له','المتبقي']),
+    ...c.ev.map(e=>cut([iso(e.d),e.t,e.n,e.q===''?'':e.q,e.price||'',e.buy||'',e.paid||'',Math.round(e.bal*100)/100])),
+    [],cut(['الإجمالي','','',r6(c.qty),'',c.total,c.paid,c.debt])],cut([14,14,28,10,14,16,16,16])]],'كشف_حساب_مورد_'+c.sup+(P?'_'+c.proj:'')+'.xlsx');
 }
 function exportSupPdf(){
-  if(!CURS)return;const c=CURS,f=n=>Math.round(n).toLocaleString('en-US');
+  if(!CURS)return;const c=CURS,P=!!c.proj,f=n=>Math.round(n).toLocaleString('en-US');
+  const head=P?'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th>'
+              :'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
+  const box=P?`<div class="box"><div>مشتريات المشروع<b>${f(c.total)}</b></div><div>إجمالي الكمية<b>${fq(c.qty)}</b></div></div>`
+             :`<div class="box"><div>إجمالي المشتريات<b>${f(c.total)}</b></div><div>المدفوع له<b class="g">${f(c.paid)}</b></div><div>المتبقي له (علينا)<b class="${c.debt>0.5?'o':'g'}">${f(c.debt)}</b></div></div>`;
+  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?f(e.price):''}</td><td>${e.buy?f(e.buy):''}</td>`+(P?'':`<td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td>`)+'</tr>';
+  const foot=`<tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${f(c.total)}</td>`+(P?'':`<td>${f(c.paid)}</td><td>${f(c.debt)}</td>`)+'</tr>';
   printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>كشف حساب مورد - ${esc(c.sup)}</title><style>${PDF_CSS}</style></head><body>
   <h1>كشف حساب مورد</h1>
-  <p class="meta">اسم المورد: <b>${esc(c.sup)}</b><br>تاريخ الاستخراج: ${dd(new Date())}</p>
-  <div class="box"><div>إجمالي المشتريات<b>${f(c.total)}</b></div><div>المدفوع له<b class="g">${f(c.paid)}</b></div><div>المتبقي له (علينا)<b class="${c.debt>0.5?'o':'g'}">${f(c.debt)}</b></div></div>
-  <table><tr><th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th></tr>
-  ${c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?f(e.q):''}</td><td>${e.price?f(e.price):''}</td><td>${e.buy?f(e.buy):''}</td><td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td></tr>`).join('')}
-  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${f(c.qty)}</td><td></td><td>${f(c.total)}</td><td>${f(c.paid)}</td><td>${f(c.debt)}</td></tr></table></body></html>`);
+  <p class="meta">اسم المورد: <b>${esc(c.sup)}</b>${P?'<br>المشروع: <b>'+esc(c.proj)+'</b> (مشتريات المشروع فقط — دفعات المورد مش مربوطة بمشروع)':''}<br>تاريخ الاستخراج: ${dd(new Date())}</p>
+  ${box}
+  <table><tr>${head}</tr>
+  ${c.ev.map(row).join('')}
+  ${foot}</table></body></html>`);
 }
+
 
 /* ================= التفاعل ================= */
 function toggleTheme(){
@@ -778,4 +778,4 @@ load();
 setInterval(()=>{if(getUrl())load()},AUTO_REFRESH_MIN*60*1000);
 </script>
 </body>
-</html>
+          </html>
