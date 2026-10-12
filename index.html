@@ -462,9 +462,9 @@ function render(){
   chart('c6','doughnut',['المشتريات','النولون',pr>=0?'المكسب':'الخسارة'],[{data:[buy,frt,Math.abs(pr)],backgroundColor:['#fbbf24','#f87171',pr>=0?'#34d399':'#7f1d1d'],borderWidth:0}]);
 
   const total=(arr,f)=>fmt(sum(arr,f));
-  tbl('supT',['المورد','العمليات','الكمية','المشتريات','متوسط السعر/طن'],sk.map(k=>[esc(k),sp[k].length,fq(sum(sp[k],x=>x.qty)),total(sp[k],x=>x.buy),fmt(sum(sp[k],x=>x.buy)/(sum(sp[k],x=>x.qty)||1))]));
-  tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fq(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]));
-  tbl('prjT',['المشروع','العمليات','المبيعات','المكسب','الهامش'],pk.map(k=>{const s=sum(pj[k],x=>x.sale),p=sum(pj[k],x=>x.profit);return[esc(k),pj[k].length,fmt(s),`<span class="${p>=0?'g':'r'}">${fmt(p)}</span>`,(s?p/s*100:0).toFixed(1)+'%']}));
+  tbl('supT',['المورد','العمليات','الكمية','المشتريات','متوسط السعر/طن'],sk.map(k=>[esc(k),sp[k].length,fq(sum(sp[k],x=>x.qty)),total(sp[k],x=>x.buy),fmt(sum(sp[k],x=>x.buy)/(sum(sp[k],x=>x.qty)||1))]),['الإجمالي',d.length,fq(qty),fmt(buy),fmt(buy/(qty||1))]);
+  tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fq(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]),['الإجمالي',d.length,fq(qty),fmt(frt),fmt(d.length?frt/d.length:0)]);
+  tbl('prjT',['المشروع','العمليات','المبيعات','المكسب','الهامش'],pk.map(k=>{const s=sum(pj[k],x=>x.sale),p=sum(pj[k],x=>x.profit);return[esc(k),pj[k].length,fmt(s),`<span class="${p>=0?'g':'r'}">${fmt(p)}</span>`,(s?p/s*100:0).toFixed(1)+'%']}),['الإجمالي',d.length,fmt(sale),`<span class="${pr>=0?'g':'r'}">${fmt(pr)}</span>`,(sale?pr/sale*100:0).toFixed(1)+'%']);
   renderDebt();renderSupDebt();
   if(CURS&&$('supDetail').style.display==='block')showSupplier(CURS.sup,true); // يحدّث كشف المورد المفتوح لما الفلتر يتغير
 }
@@ -492,24 +492,24 @@ function chart(id,type,labels,datasets,o){
 }
 function tbl(id,heads,rows,foot){
   $(id).innerHTML=rows.length?
-   '<thead><tr>'+heads.map(h=>`<th>${h}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('')+'</tbody>'
+   '<thead><tr>'+heads.map(h=>`<th>${h}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>`<td>${c}</td>`).join('')+'</tr>').join('')+'</tbody>'+(foot?'<tfoot><tr>'+foot.map(c=>`<td>${c}</td>`).join('')+'</tr></tfoot>':'')
    :'<tbody><tr><td class="empty">لا توجد بيانات في الفترة المحددة</td></tr></tbody>';
 }
 
 /* ====== مستحقات الموردين ====== */
 function supList(){
-  const m={},mk=k=>m[k]=m[k]||{sup:k,total:0,paid:0,n:0};
-  SALES.forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.n++});
+  const m={},mk=k=>m[k]=m[k]||{sup:k,total:0,paid:0,n:0,qty:0};
+  SALES.forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.qty+=x.qty;c.n++});
   SUPPAYS.forEach(x=>{mk(x.sup||'غير محدد').paid+=x.amt});
   return Object.values(m).map(c=>({...c,debt:c.total-c.paid}));
 }
 function renderSupDebt(){
   const a=supList().sort((x,y)=>y.debt-x.debt);
   if(!a.length){$('supDebtT').innerHTML='<tbody><tr><td class="empty">لا توجد بيانات</td></tr></tbody>';return}
-  $('supDebtT').innerHTML='<thead><tr><th>المورد</th><th>العمليات</th><th>إجمالي المشتريات</th><th>المدفوع له</th><th>المتبقي له (علينا)</th><th>نسبة السداد</th></tr></thead><tbody>'+
+  $('supDebtT').innerHTML='<thead><tr><th>المورد</th><th>العمليات</th><th>إجمالي المشتريات</th><th>الكمية</th><th>المدفوع له</th><th>المتبقي له (علينا)</th><th>نسبة السداد</th></tr></thead><tbody>'+
    a.map(x=>{const pc=x.total?Math.min(100,x.paid/x.total*100):0,bad=x.total==0&&x.paid>0;
-    return `<tr class="cl" data-sup="${esc(x.sup)}"><td><b>${esc(x.sup)}</b>${bad?' <span class="badge b-o">اسم غير مسجل في المشتريات</span>':''}</td><td>${x.n}</td><td>${fmt(x.total)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'o':'g'}"><b>${fmt(x.debt)}</b></td><td><div class="bar"><i style="width:${pc}%"></i></div>${pc.toFixed(0)}%</td></tr>`}).join('')+
-   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="o">${fmt(sum(a,x=>x.debt))}</td><td></td></tr></tfoot>`;
+    return `<tr class="cl" data-sup="${esc(x.sup)}"><td><b>${esc(x.sup)}</b>${bad?' <span class="badge b-o">اسم غير مسجل في المشتريات</span>':''}</td><td>${x.n}</td><td>${fmt(x.total)}</td><td>${fq(x.qty)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'o':'g'}"><b>${fmt(x.debt)}</b></td><td><div class="bar"><i style="width:${pc}%"></i></div>${pc.toFixed(0)}%</td></tr>`}).join('')+
+   `</tbody><tfoot><tr><td>الإجمالي</td><td>${sum(a,x=>x.n)}</td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="o">${fmt(sum(a,x=>x.debt))}</td><td>${(sum(a,x=>x.total)?Math.min(100,sum(a,x=>x.paid)/sum(a,x=>x.total)*100):0).toFixed(0)}%</td></tr></tfoot>`;
 }
 
 /* ====== توزيع الدفعات على الفواتير (FIFO) ====== */
@@ -611,12 +611,12 @@ function renderDebt(){
     const utilC=x.limit>0?`<div class="bar"><i style="width:${Math.min(100,x.util)}%;background:${x.over?'var(--rd)':x.near?'var(--or)':'var(--gr)'}"></i></div>${x.util.toFixed(0)}%`:'—';
     return `<tr class="cl${x.over?' over':''}" data-pk="${esc(x.pk)}"><td><b>${esc(x.client)}</b></td><td dir="ltr" style="text-align:right">${esc(x.phone)}</td><td>${fmt(x.total)}</td><td>${fq(x.qty)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'r':'g'}"><b>${fmt(x.debt)}</b></td><td>${limC}</td><td>${utilC}</td><td><div class="bar"><i style="width:${Math.min(100,x.pct)}%"></i></div>${x.pct.toFixed(0)}%</td><td>${dd(x.last)}</td><td>${ageBadge(x)}</td><td style="display:flex;gap:6px">${lb}${wa}</td></tr>`}).join('')
    :'<tr><td colspan="12" class="empty">لا يوجد عملاء مطابقين</td></tr>')+
-   `</tbody><tfoot><tr><td>الإجمالي</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="r">${fmt(sum(a,x=>x.debt))}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr></tfoot>`;
+   `</tbody><tfoot><tr><td>الإجمالي (${a.length} عميل)</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="r">${fmt(sum(a,x=>x.debt))}</td><td></td><td></td><td>${(sum(a,x=>x.total)?sum(a,x=>x.paid)/sum(a,x=>x.total)*100:0).toFixed(0)}%</td><td></td><td></td><td></td></tr></tfoot>`;
 }
 function exportDebts(){
   if(typeof XLSX==='undefined'){alert('مكتبة Excel مش اتحملت — اتأكد من الاتصال بالإنترنت وحدّث الصفحة.');return}
   const aoa=[['العميل','التليفون','إجمالي المبيعات','الكمية','المدفوع','المتبقي','الحد الائتماني','استخدام الحد %','تعدّى الحد؟','نسبة السداد %','آخر عملية بيع','عمر أقدم فاتورة مفتوحة (يوم)','0-30','31-60','61-90','+90'],
-    ...LASTLIST.map(x=>[x.client,x.phone,Math.round(x.total),r6(x.qty),Math.round(x.paid),Math.round(x.debt),x.limit||'',x.limit?Math.round(x.util):'',x.over?'نعم':'',Math.round(x.pct),iso(x.last),x.debt>0.5&&x.hasAge?x.age:'',...x.b.map(Math.round)])];
+    ...LASTLIST.map(x=>[x.client,x.phone,Math.round(x.total),r6(x.qty),Math.round(x.paid),Math.round(x.debt),x.limit||'',x.limit?Math.round(x.util):'',x.over?'نعم':'',Math.round(x.pct),iso(x.last),x.debt>0.5&&x.hasAge?x.age:'',...x.b.map(Math.round)]),['الإجمالي','',Math.round(sum(LASTLIST,x=>x.total)),r6(sum(LASTLIST,x=>x.qty)),Math.round(sum(LASTLIST,x=>x.paid)),Math.round(sum(LASTLIST,x=>x.debt))]];
   const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:26},{wch:15},{wch:16},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:12},{wch:14},{wch:18},{wch:12},{wch:12},{wch:12},{wch:12}];
   const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};XLSX.utils.book_append_sheet(wb,ws,'المديونيات');
   XLSX.writeFile(wb,'مديونيات_العملاء_'+iso(new Date())+'.xlsx');
@@ -669,7 +669,7 @@ function showClient(pk){
     <h3 class="sub">الفواتير وحالة سدادها <small style="color:var(--mu);font-weight:400">(الدفعات بتتوزع على الأقدم أولًا، أو على الفاتورة المربوطة بالدفعة) — الجزء ده مش بيظهر في ملفات التحميل</small></h3>
     <div class="tw"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المشروع</th><th>الكمية</th><th>قيمة الفاتورة</th><th>المسدد</th><th>المتبقي</th><th>العمر</th><th>الحالة</th></tr></thead><tbody>`+
    (c.inv.length?c.inv.map(i=>`<tr><td>#${i.rn}</td><td>${dd(i.date)}</td><td>${esc(i.proj)}</td><td>${i.qty?fq(i.qty):''}</td><td>${fmt(i.amount)}</td><td class="g">${fmt(i.paid)}</td><td class="${i.rem>0.5?'r':'g'}">${fmt(i.rem)}</td><td>${i.rem>0.5&&i.age!=null?`<span class="badge ${ageCls(i.age)}">${i.age} يوم</span>`:''}</td><td>${stBadge(i)}</td></tr>`).join(''):'<tr><td colspan="9" class="empty">لا توجد فواتير</td></tr>')+
-   `</tbody></table></div>
+   `</tbody>${c.inv.length?`<tfoot><tr><td>الإجمالي</td><td></td><td></td><td>${fq(sum(c.inv,i=>i.qty))}</td><td>${fmt(sum(c.inv,i=>i.amount))}</td><td class="g">${fmt(sum(c.inv,i=>i.paid))}</td><td class="${sum(c.inv,i=>i.rem)>0.5?'r':'g'}">${fmt(sum(c.inv,i=>i.rem))}</td><td></td><td></td></tr></tfoot>`:''}</table></div>
     <h3 class="sub">حركة الحساب</h3>
     <div class="tw"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>الفاتورة</th><th>بيان</th><th>الكمية</th><th>عليه</th><th>له (مدفوع)</th><th>الرصيد</th></tr></thead><tbody>`+
    c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${e.ref}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.sale?fmt(e.sale):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'r':'g'}">${fmt(e.bal)}</td></tr>`).join('')+
@@ -778,4 +778,4 @@ load();
 setInterval(()=>{if(getUrl())load()},AUTO_REFRESH_MIN*60*1000);
 </script>
 </body>
-          </html>
+</html>
