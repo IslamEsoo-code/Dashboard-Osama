@@ -166,6 +166,7 @@ h3.sub{font-size:14px;margin:16px 0 8px}
     <button data-t="clients" id="tabClients">💰 العملاء والمديونية</button>
     <button data-t="suppliers">🏭 الموردين</button>
     <button data-t="analysis">🔍 تحليل تفصيلي</button>
+    <button data-t="transport">🚛 النقل</button>
   </nav>
 
   <!-- نظرة عامة -->
@@ -216,6 +217,35 @@ h3.sub{font-size:14px;margin:16px 0 8px}
       <div class="card"><h2>تحليل المشاريع</h2><div class="tw"><table id="prjT"></table></div></div>
     </div>
   </section>
+
+  <!-- النقل -->
+  <section class="tab" id="t-transport">
+    <div id="trConnect" class="card" style="max-width:560px;margin:20px auto;text-align:center;display:none">
+      <h2 style="justify-content:center">🚛 النقل</h2>
+      <p style="color:var(--mu)">تابة النقل بتقرا من نفس رابط الـ Apps Script بتاع المبيعات. اربط الرابط الأول من زر «تغيير الرابط» فوق.</p>
+      <button class="link" onclick="trDemo()">أو جرّب ببيانات تجريبية</button>
+    </div>
+    <div id="trBody" style="display:none">
+      <div class="tools">
+        <select id="trCo"><option value="">كل الشركات</option></select>
+        <select id="trFac"><option value="">كل المصانع</option></select>
+        <button class="ghost sm" onclick="trLoad(true)">🔄 تحديث النقل</button>
+        <button class="ghost sm" onclick="trExportXlsx()">📊 Excel</button>
+        <button class="ghost sm" onclick="trExportPdf()">📄 PDF</button>
+        <small style="color:var(--mu)">الفلتر الزمني فوق بيشتغل هنا برضه</small>
+      </div>
+      <div id="trMsg" style="display:none;margin-bottom:12px;color:var(--rd);font-weight:600"></div>
+      <div class="kpis sm" id="trKpi"></div>
+      <div class="grid">
+        <div class="card"><h2>المكسب شهريًا</h2><div class="cv"><canvas id="c8"></canvas></div></div>
+        <div class="card"><h2>تحليل حسب الشركة</h2><div class="tw"><table id="trCoT"></table></div></div>
+        <div class="card"><h2>تحليل حسب المصنع</h2><div class="tw"><table id="trFacT"></table></div></div>
+        <div class="card"><h2>تحليل حسب السواق</h2><div class="tw"><table id="trDrvT"></table></div></div>
+        <div class="card"><h2>تحليل حسب جهة التعتيق</h2><div class="tw"><table id="trDstT"></table></div></div>
+      </div>
+      <div class="card"><h2>كل الرحلات <small>(المكسب = النولون + نسبة الشريك − (سعر الطن × الكمية))</small></h2><div class="tw"><table id="trListT"></table></div></div>
+    </div>
+  </section>
 </div>
 </div>
 
@@ -225,6 +255,7 @@ const PRICE_PER_TON   = true;  // سعر الشراء وسعر البيع للط
 const FREIGHT_PER_TON = true;  // النولون للطن الواحد (false = إجمالي الرحلة)
 const AGE_WARN = 30, AGE_BAD = 60; // أيام: بعدها المديونية تتلوّن برتقالي / أحمر
 const AUTO_REFRESH_MIN = 5;
+const TRANS_FREIGHT_PER_TON = false; // النقل: النولون إجمالي الرحلة (true = للطن الواحد ويتضرب في الكمية)
 const DEFAULT_CREDIT_LIMIT = 0;   // حد ائتماني افتراضي لكل العملاء (0 = بدون حد) — تقدر تعدّل حد كل عميل من الجدول
 const LIMIT_WARN_PCT = 80;        // تنبيه مبكر لما العميل يوصل للنسبة دي من حده
 /* الداشبورد بيقرا أعمدة الشيت بأسماء العناوين (الترتيب مش مهم):
@@ -466,6 +497,7 @@ function render(){
   tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fq(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]),['الإجمالي',d.length,fq(qty),fmt(frt),fmt(d.length?frt/d.length:0)]);
   tbl('prjT',['المشروع','العمليات','المبيعات','المكسب','الهامش'],pk.map(k=>{const s=sum(pj[k],x=>x.sale),p=sum(pj[k],x=>x.profit);return[esc(k),pj[k].length,fmt(s),`<span class="${p>=0?'g':'r'}">${fmt(p)}</span>`,(s?p/s*100:0).toFixed(1)+'%']}),['الإجمالي',d.length,fmt(sale),`<span class="${pr>=0?'g':'r'}">${fmt(pr)}</span>`,(sale?pr/sale*100:0).toFixed(1)+'%']);
   renderDebt();renderSupDebt();
+  if(TRANS.length)renderTrans();
   if(CURS&&$('supDetail').style.display==='block')showSupplier(CURS.sup,true); // يحدّث كشف المورد المفتوح لما الفلتر يتغير
 }
 
@@ -750,6 +782,120 @@ function exportSupPdf(){
 }
 
 
+/* ================= النقل ================= */
+const TR_CACHE='sales_dash_trans_cache';
+let TRANS=[],TR_DEMO=false,TR_SHOWN=false;
+const trUrl=()=>{const u=getUrl();return u?u+(u.includes('?')?'&':'?')+'sheet=transport':''}; // نفس رابط المبيعات + باراميتر sheet=transport
+const grpN=(arr,f)=>{const m={};arr.forEach(x=>{const raw=key(f(x))||'غير محدد',k=nz(raw);(m[k]=m[k]||{label:raw,items:[]}).items.push(x)});return Object.values(m)};
+function parseTrans(h,rows,rn){
+  const H=h.map(x=>nz(x).toLowerCase());
+  const col=(...ks)=>H.findIndex(x=>ks.some(k=>x.includes(nz(k).toLowerCase())));
+  const iD=(()=>{const a=col('التاريخ');return a>=0?a:col('الطابع','timestamp')})(),
+    iCo=col('الشركة'),iFa=col('المصنع'),iDr=col('السواق'),iCar=col('العربية'),iQ=col('الكمية'),
+    iDe=col('التعتيق'),iRe=col('الافراج'),iFr=col('النولون'),iPa=col('الشريك'),iTo=col('سعر الطن');
+  const miss=[['اسم الشركة',iCo],['الكمية',iQ],['النولون',iFr],['نسبة الشريك',iPa],['سعر الطن',iTo]].filter(x=>x[1]<0).map(x=>x[0]);
+  if(miss.length)throw new Error('مش لاقي أعمدة النقل ('+miss.join('، ')+') — اتأكد إن الـ Apps Script بيرجّع تبويب النقل وإن أسماء الأعمدة في التبويب زي ما هي.');
+  TRANS=[];
+  rows.forEach((r,idx)=>{
+    const g=i=>i>=0?r[i]:'';
+    const qty=num(g(iQ)),frt=num(g(iFr)),pa=num(g(iPa)),ton=num(g(iTo)),co=key(g(iCo));
+    if(!qty&&!frt&&!pa&&!ton&&!co)return;
+    const o={date:pdate(g(iD)),co,factory:key(g(iFa)),driver:key(g(iDr)),car:key(g(iCar)),qty,dest:key(g(iDe)),rel:key(g(iRe)),
+      frt:TRANS_FREIGHT_PER_TON?frt*qty:frt,partner:pa,ton,rn:(rn&&rn[idx])||idx+2};
+    o.cost=ton*qty;                       // سعر الطن × الكمية
+    o.profit=o.frt+o.partner-o.cost;      // النولون + نسبة الشريك − التكلفة
+    TRANS.push(o);
+  });
+}
+function trSel(){
+  const {f,t}=rng(),co=$('trCo').value,fa=$('trFac').value;
+  return TRANS.filter(x=>(!f||(x.date&&x.date>=f))&&(!t||(x.date&&x.date<t))&&(!co||nz(x.co)==co)&&(!fa||nz(x.factory)==fa));
+}
+function trFill(){
+  [['trCo','co','كل الشركات'],['trFac','factory','كل المصانع']].forEach(([id,k,all])=>{
+    const sel=$(id),cur=sel.value;
+    sel.innerHTML=`<option value="">${all}</option>`+grpN(TRANS.filter(x=>x[k]),x=>x[k]).sort((a,b)=>a.label.localeCompare(b.label,'ar')).map(g=>`<option value="${esc(nz(g.label))}">${esc(g.label)}</option>`).join('');
+    sel.value=cur});
+}
+function trShow(){
+  const has=TR_DEMO||getUrl();
+  $('trConnect').style.display=has?'none':'block';
+  $('trBody').style.display=has?'block':'none';
+}
+function trDemo(){
+  TR_DEMO=true;TRANS=[];
+  const C=['سيسكو','العامرية'],F=['مصنع 1','مصنع 2','مصنع 3'],D=['محمود','سيد','عادل'],G=['القاهرة','الجيزة','السويس'];
+  for(let i=0;i<40;i++){const q=20+Math.round(Math.random()*20*100)/100,ton=300+Math.round(Math.random()*100),fr=q*ton+2000+Math.round(Math.random()*1500),pa=300+Math.round(Math.random()*400);
+    const o={date:new Date(2026,Math.floor(i/10)+6,1+i%28),co:C[i%2],factory:F[i%3],driver:D[i%3],car:'أ ب ج '+(1000+i),qty:q,dest:G[i%3],rel:'R'+(500+i),frt:fr,partner:pa,ton,rn:i+2};
+    o.cost=o.ton*o.qty;o.profit=o.frt+o.partner-o.cost;TRANS.push(o)}
+  trShow();trFill();renderTrans();
+}
+async function trLoad(force){
+  const url=trUrl();trShow();
+  if(!url&&!TR_DEMO)return;
+  if(TR_DEMO)return;
+  const m=$('trMsg');m.style.display='none';
+  try{
+    if(!TRANS.length&&!force){try{const c=JSON.parse(store.get(TR_CACHE)||'null');if(c){parseTrans(c.headers||[],c.rows||[],c.rowNums);trFill();renderTrans()}}catch(e){}}
+    const res=await fetch(url+(url.includes('?')?'&':'?')+'refresh=1&t='+Date.now());
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const j=await res.json();if(j.error)throw new Error(j.error);
+    parseTrans(j.headers||[],j.rows||[],j.rowNums);
+    store.set(TR_CACHE,JSON.stringify({headers:j.headers||[],rows:j.rows||[],rowNums:j.rowNums||null}));
+    trFill();renderTrans();
+  }catch(e){m.textContent='❌ مشكلة في بيانات النقل: '+e.message;m.style.display='block'}
+}
+function trTotals(a){return {n:a.length,qty:sum(a,x=>x.qty),frt:sum(a,x=>x.frt),pa:sum(a,x=>x.partner),cost:sum(a,x=>x.cost),pr:sum(a,x=>x.profit)}}
+const prC=v=>`<span class="${v>=0?'g':'r'}">${fmt(v)}</span>`;
+function renderTrans(){
+  if(!$('trKpi'))return;
+  const d=trSel(),T=trTotals(d);
+  $('trKpi').innerHTML=[
+    ['عدد الرحلات',fmt(T.n),'🚛','var(--mu)'],['إجمالي الكمية',fq(T.qty),'⚖️','var(--or)'],
+    ['إجمالي النولون',fmt(T.frt),'💵','var(--bl)'],['إجمالي نسبة الشريك',fmt(T.pa),'🤝','var(--pr)'],
+    ['إجمالي تكلفة الطن',fmt(T.cost),'🏷️','var(--or)'],['صافي المكسب',prC(T.pr),'📈',T.pr>=0?'var(--gr)':'var(--rd)'],
+    ['متوسط المكسب/طن',fmt(T.qty?T.pr/T.qty:0),'📊','var(--gr)']].map(x=>kpi(...x)).join('');
+  const mo=group(d.filter(x=>x.date),x=>x.date.getFullYear()+'-'+String(x.date.getMonth()+1).padStart(2,'0')),mk=Object.keys(mo).sort();
+  chart('c8','bar',mk,[{label:'المكسب',data:mk.map(k=>sum(mo[k],x=>x.profit)),backgroundColor:'#34d399',borderRadius:6}]);
+  const heads=n=>[n,'الرحلات','الكمية','النولون','نسبة الشريك','تكلفة الطن','المكسب'];
+  const grpTable=(id,label,f)=>{
+    const g=grpN(d,f).sort((a,b)=>sum(b.items,x=>x.profit)-sum(a.items,x=>x.profit));
+    tbl(id,heads(label),g.map(o=>{const t=trTotals(o.items);return [esc(o.label),t.n,fq(t.qty),fmt(t.frt),fmt(t.pa),fmt(t.cost),prC(t.pr)]}),
+      ['الإجمالي',T.n,fq(T.qty),fmt(T.frt),fmt(T.pa),fmt(T.cost),prC(T.pr)]);
+  };
+  grpTable('trCoT','الشركة',x=>x.co);grpTable('trFacT','المصنع',x=>x.factory);
+  grpTable('trDrvT','السواق',x=>x.driver);grpTable('trDstT','جهة التعتيق',x=>x.dest);
+  const L=[...d].sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn);
+  tbl('trListT',['التاريخ','الشركة','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون','نسبة الشريك','سعر الطن','تكلفة الطن','المكسب'],
+    L.map(x=>[dd(x.date),esc(x.co),esc(x.factory),esc(x.driver),esc(x.car),fq(x.qty),esc(x.dest),esc(x.rel),fmt(x.frt),fmt(x.partner),fmt(x.ton),fmt(x.cost),prC(x.profit)]),
+    ['الإجمالي','','','','',fq(T.qty),'','',fmt(T.frt),fmt(T.pa),'',fmt(T.cost),prC(T.pr)]);
+}
+function trExportXlsx(){
+  if(noXlsx())return;const d=trSel(),T=trTotals(d);
+  const L=[...d].sort((a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn);
+  const det=[['التاريخ','الشركة','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون','نسبة الشريك','سعر الطن','تكلفة الطن','المكسب'],
+    ...L.map(x=>[iso(x.date),x.co,x.factory,x.driver,x.car,r6(x.qty),x.dest,x.rel,x.frt,x.partner,x.ton,r6(x.cost),r6(x.profit)]),
+    ['الإجمالي','','','','',r6(T.qty),'','',r6(T.frt),r6(T.pa),'',r6(T.cost),r6(T.pr)]];
+  const sm=[['الشركة','الرحلات','الكمية','النولون','نسبة الشريك','تكلفة الطن','المكسب'],
+    ...grpN(d,x=>x.co).map(o=>{const t=trTotals(o.items);return [o.label,t.n,r6(t.qty),r6(t.frt),r6(t.pa),r6(t.cost),r6(t.pr)]}),
+    ['الإجمالي',T.n,r6(T.qty),r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
+  saveXlsx([['الرحلات',det,[12,14,16,16,14,10,16,14,12,12,10,14,14]],['ملخص حسب الشركة',sm,[16,10,10,14,14,14,14]]],'تقرير_النقل_'+iso(new Date())+'.xlsx');
+}
+function trExportPdf(){
+  const d=trSel(),T=trTotals(d),f=n=>Math.round(n).toLocaleString('en-US');
+  const L=[...d].sort((a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn);
+  const sm=grpN(d,x=>x.co).map(o=>{const t=trTotals(o.items);return `<tr><td>${esc(o.label)}</td><td>${t.n}</td><td>${fq(t.qty)}</td><td>${f(t.frt)}</td><td>${f(t.pa)}</td><td>${f(t.cost)}</td><td>${f(t.pr)}</td></tr>`}).join('');
+  printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير النقل</title><style>${PDF_CSS}</style></head><body>
+  <h1>تقرير النقل</h1><p class="meta">تاريخ الاستخراج: ${dd(new Date())}</p>
+  <div class="box"><div>عدد الرحلات<b>${T.n}</b></div><div>إجمالي الكمية<b>${fq(T.qty)}</b></div><div>إجمالي النولون<b>${f(T.frt)}</b></div><div>نسبة الشريك<b>${f(T.pa)}</b></div><div>صافي المكسب<b class="${T.pr>=0?'g':'r'}">${f(T.pr)}</b></div></div>
+  <table><tr><th>الشركة</th><th>الرحلات</th><th>الكمية</th><th>النولون</th><th>نسبة الشريك</th><th>تكلفة الطن</th><th>المكسب</th></tr>${sm}
+  <tr class="tot"><td>الإجمالي</td><td>${T.n}</td><td>${fq(T.qty)}</td><td>${f(T.frt)}</td><td>${f(T.pa)}</td><td>${f(T.cost)}</td><td>${f(T.pr)}</td></tr></table>
+  <h3>الرحلات</h3>
+  <table><tr><th>التاريخ</th><th>الشركة</th><th>المصنع</th><th>السواق</th><th>العربية</th><th>الكمية</th><th>جهة التعتيق</th><th>الإفراج</th><th>النولون</th><th>الشريك</th><th>سعر الطن</th><th>المكسب</th></tr>
+  ${L.map(x=>`<tr><td>${dd(x.date)}</td><td>${esc(x.co)}</td><td>${esc(x.factory)}</td><td>${esc(x.driver)}</td><td>${esc(x.car)}</td><td>${fq(x.qty)}</td><td>${esc(x.dest)}</td><td>${esc(x.rel)}</td><td>${f(x.frt)}</td><td>${f(x.partner)}</td><td>${f(x.ton)}</td><td>${f(x.profit)}</td></tr>`).join('')}
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td></td><td></td><td>${fq(T.qty)}</td><td></td><td></td><td>${f(T.frt)}</td><td>${f(T.pa)}</td><td></td><td>${f(T.pr)}</td></tr></table></body></html>`);
+}
+
 /* ================= التفاعل ================= */
 function toggleTheme(){
   const r=document.documentElement,n=r.dataset.theme=='dark'?'light':'dark';
@@ -766,7 +912,9 @@ $('search').oninput=renderDebt;$('onlyDebt').onchange=renderDebt;
 $('tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
   document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x==b));
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id=='t-'+b.dataset.t));
+  if(b.dataset.t=='transport'&&!TR_SHOWN){TR_SHOWN=true;trShow();trLoad()}
   Object.values(charts).forEach(c=>c.resize())};
+['trCo','trFac'].forEach(id=>$(id).onchange=renderTrans);
 $('debtT').onclick=e=>{
   const lb=e.target.closest('[data-lim]');if(lb){e.stopPropagation();editLimit(lb.dataset.lim);return}
   const th=e.target.closest('th.s');
@@ -775,7 +923,7 @@ $('debtT').onclick=e=>{
 };
 $('supDebtT').onclick=e=>{const tr=e.target.closest('tr.cl');if(tr)showSupplier(tr.dataset.sup)};
 load();
-setInterval(()=>{if(getUrl())load()},AUTO_REFRESH_MIN*60*1000);
+setInterval(()=>{if(getUrl())load();if(trUrl()&&TR_SHOWN)trLoad(true)},AUTO_REFRESH_MIN*60*1000);
 </script>
 </body>
 </html>
