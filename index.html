@@ -237,6 +237,7 @@ h3.sub{font-size:14px;margin:16px 0 8px}
         <small style="color:var(--mu)">الفلتر الزمني فوق بيشتغل هنا برضه</small>
       </div>
       <div id="trMsg" style="display:none;margin-bottom:12px;color:var(--rd);font-weight:600"></div>
+      <div id="trWarn" style="display:none;margin-bottom:12px;color:var(--or);font-weight:600"></div>
       <div class="kpis sm" id="trKpi"></div>
       <div class="grid">
         <div class="card"><h2>المكسب شهريًا</h2><div class="cv"><canvas id="c8"></canvas></div></div>
@@ -276,6 +277,7 @@ const AGE_WARN = 30, AGE_BAD = 60; // أيام: بعدها المديونية ت
 const AUTO_REFRESH_MIN = 5;
 const TRANS_FREIGHT_PER_TON = true;  // النقل: النولون للطن الواحد ويتضرب في الكمية (false = إجمالي الرحلة)
 const SANAD_NAME = 'السند';           // اسم مشروع السند في عمود المشروع (لحساب مكسبه في تابة صافي الربح)
+const TRANS_MAX_QTY = 150;            // أقصى كمية معقولة للرحلة الواحدة (طن). أكبر من كده بتتقسم على 1000 تلقائيًا
 const TRANS_PARTNER_PER_TON = true;  // النقل: نسبة الشريك للطن الواحد وتتضرب في الكمية (false = إجمالي الرحلة)
 const DEFAULT_CREDIT_LIMIT = 0;   // حد ائتماني افتراضي لكل العملاء (0 = بدون حد) — تقدر تعدّل حد كل عميل من الجدول
 const LIMIT_WARN_PCT = 80;        // تنبيه مبكر لما العميل يوصل للنسبة دي من حده
@@ -300,8 +302,17 @@ const nz=t=>String(t||'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(
 
 function num(v){
   if(v==null)return 0;
-  v=String(v).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[,٬\s]/g,'').replace(/[^\d.\-]/g,'');
+  v=String(v).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g,'.').replace(/[,٬\s]/g,'').replace(/[^\d.\-]/g,'');
   return parseFloat(v)||0;
+}
+// الكمية: الفاصلة بتتقري كعلامة عشرية (58,485 = 58.485) لأن كمية الرحلة عمرها ما بتبقى بالآلاف
+function numQ(v){
+  if(v==null)return 0;
+  if(typeof v=='string'){
+    const t=v.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/٫/g,'.').replace(/\s/g,'');
+    if(/^\d+[,٬]\d{1,3}$/.test(t))return num(t.replace(/[,٬]/,'.'));
+  }
+  return num(v);
 }
 function pdate(v){
   if(v instanceof Date)return isNaN(v)?null:v;
@@ -367,7 +378,7 @@ function parseSheet(h,rows,rn){
     const isPay=iType>=0?tp.includes('سداد'):(!sale&&(payAmt>0||adv>0));
     const pk=ph(first(r,phoneCols));
     if(isPay){if(payAmt||adv)PAYS.push({date,pk,amt:payAmt||adv,note:key(first(r,noteCols)),inv:Math.round(num(first(r,invCols)))||0,rn:rowNo});return}
-    const client=key(g(iClient)),qty=num(g(iQty));
+    const client=key(g(iClient)),qty=numQ(g(iQty));
     if(!sale&&!qty&&!adv&&!client&&!pk)return;               // صف فاضي — تجاهله
     const o={date,proj:key(first(r,projCols)),client,phone:pk,driver:key(g(iDrv)),qty,sup:key(first(r,supCols)),adv,rn:rowNo,credit:num(first(r,limCols)),
       unitBuy:num(g(iBuy)),unitFrt:num(g(iFrt)),unitSale:sale};
@@ -829,7 +840,7 @@ function exportSupPdf(){
 
 /* ================= النقل ================= */
 const TR_CACHE='sales_dash_trans_cache';
-let TRANS=[],TR_DEMO=false,TR_SHOWN=false;
+let TRANS=[],TR_DEMO=false,TR_SHOWN=false,TR_FIXED=0;
 const trUrl=()=>{const u=getUrl();return u?u+(u.includes('?')?'&':'?')+'sheet=transport':''}; // نفس رابط المبيعات + باراميتر sheet=transport
 const grpN=(arr,f)=>{const m={};arr.forEach(x=>{const raw=key(f(x))||'غير محدد',k=nz(raw);(m[k]=m[k]||{label:raw,items:[]}).items.push(x)});return Object.values(m)};
 function parseTrans(h,rows,rn){
@@ -840,10 +851,12 @@ function parseTrans(h,rows,rn){
     iDe=col('التعتيق'),iRe=col('الافراج'),iFr=col('النولون'),iPa=col('الشريك'),iTo=col('سعر الطن');
   const miss=[['اسم الشركة',iCo],['الكمية',iQ],['النولون',iFr],['نسبة الشريك',iPa],['سعر الطن',iTo]].filter(x=>x[1]<0).map(x=>x[0]);
   if(miss.length)throw new Error('مش لاقي أعمدة النقل ('+miss.join('، ')+') — اتأكد إن الـ Apps Script بيرجّع تبويب النقل وإن أسماء الأعمدة في التبويب زي ما هي.');
-  TRANS=[];
+  TRANS=[];TR_FIXED=0;
   rows.forEach((r,idx)=>{
     const g=i=>i>=0?r[i]:'';
-    const qty=num(g(iQ)),frt=num(g(iFr)),pa=num(g(iPa)),ton=num(g(iTo)),co=key(g(iCo));
+    let qty=numQ(g(iQ));
+    if(qty>TRANS_MAX_QTY&&qty/1000<=TRANS_MAX_QTY){qty=qty/1000;TR_FIXED++}
+    const frt=num(g(iFr)),pa=num(g(iPa)),ton=num(g(iTo)),co=key(g(iCo));
     if(!qty&&!frt&&!pa&&!ton&&!co)return;
     const o={date:pdate(g(iD)),co,factory:key(g(iFa)),driver:key(g(iDr)),car:key(g(iCar)),qty,dest:key(g(iDe)),rel:key(g(iRe)),
       frtT:frt,partT:pa,frt:TRANS_FREIGHT_PER_TON?frt*qty:frt,partner:TRANS_PARTNER_PER_TON?pa*qty:pa,ton,rn:(rn&&rn[idx])||idx+2};
@@ -894,6 +907,8 @@ function trTotals(a){return {n:a.length,qty:sum(a,x=>x.qty),frt:sum(a,x=>x.frt),
 const prC=v=>`<span class="${v>=0?'g':'r'}">${fmt(v)}</span>`;
 function renderTrans(){
   if(!$('trKpi'))return;
+  const w=$('trWarn');w.style.display=TR_FIXED?'block':'none';
+  w.textContent=TR_FIXED?`⚠️ اتصلّحت كمية ${TR_FIXED} رحلة تلقائيًا (كانت أكبر من ${TRANS_MAX_QTY} طن، غالبًا العلامة العشرية اتقرت فاصل آلاف). راجع خانة الكمية في تاب النقل في الشيت.`:'';
   const d=trSel(),T=trTotals(d);
   $('trKpi').innerHTML=[
     ['عدد الرحلات',fmt(T.n),'🚛','var(--mu)'],['إجمالي الكمية',fq(T.qty),'⚖️','var(--or)'],
