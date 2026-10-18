@@ -327,7 +327,7 @@ function parseSheet(h,rows,rn){
   const dateCols=all('التاريخ'),phoneCols=all('تلفون','تليفون','موبايل','هاتف');
   const payAmtCols=all('الدفعه','مبلغ'),advCols=all('مقدم','المدفوع'),supCols=all('المورد'),noteCols=all('ملاحظات');
   const invCols=all('فاتوره'),limCols=all('ئتمان','سقف');
-  const projCols=all('مشروع');
+  const projCols=all('مشروع','مشاريع'); // المشروع / اسم المشروع / المشاريع (جمع)
   const iType=all('نوع')[0]??-1,iDrv=all('السواق')[0]??-1,
         iQty=all('الكمية')[0]??-1,iBuy=all('سعر الشراء')[0]??-1,iFrt=all('النولون')[0]??-1,iSale=all('سعر البيع')[0]??-1;
   // عمود اسم العميل: لازم يكون "اسم + العميل" وميكونش عمود النوع ولا التليفون (عشان مايتلخبطش مع "نوع العميل/العملية")
