@@ -203,7 +203,8 @@ h3.sub{font-size:14px;margin:16px 0 8px}
   <!-- الموردين -->
   <section class="tab" id="t-suppliers">
     <div class="card" style="margin-bottom:14px">
-      <h2>مستحقات الموردين <small>(اللي لسه عليك تدفعه — على كل الفترات — اضغط على المورد لكشف حسابه)</small></h2>
+      <h2>مستحقات الموردين <small>(اللي لسه عليك تدفعه — بيتبع فلتر المورد والمشروع، ومش بيتأثر بالتاريخ — اضغط على المورد لكشف حسابه)</small></h2>
+      <div id="supDebtNote"></div>
       <div class="tw"><table id="supDebtT"></table></div>
     </div>
     <div class="card" id="supDetail" style="display:none;margin-bottom:14px"></div>
@@ -342,7 +343,7 @@ function parseSheet(h,rows,rn){
     const tp=iType>=0?nz(g(iType)):'';
     const date=pdate(first(r,dateCols))||pdate(r[0]);
     if(tp.includes('مورد')){
-      SUPPAYS.push({date,sup:key(first(r,supCols)),amt:payAmt||adv,note:key(first(r,noteCols))});return}
+      SUPPAYS.push({date,sup:key(first(r,supCols)),proj:key(g(iProj)),amt:payAmt||adv,note:key(first(r,noteCols))});return}
     const isPay=iType>=0?tp.includes('سداد'):(!sale&&(payAmt>0||adv>0));
     const pk=ph(first(r,phoneCols));
     if(isPay){if(payAmt||adv)PAYS.push({date,pk,amt:payAmt||adv,note:key(first(r,noteCols)),inv:Math.round(num(first(r,invCols)))||0,rn:rowNo});return}
@@ -530,17 +531,24 @@ function tbl(id,heads,rows,foot){
 }
 
 /* ====== مستحقات الموردين ====== */
+function supFilters(){return {p:$('fProj').value,sp:$('fSup').value}}
+// بيجمّع المورد بالاسم المُطبَّع (عشان اختلاف الكتابة ما يفصلش دفعاته عن مشترياته)
 function supList(){
-  const m={},mk=k=>m[k]=m[k]||{sup:k,total:0,paid:0,n:0,qty:0};
-  SALES.forEach(x=>{const c=mk(x.sup||'غير محدد');c.total+=x.buy;c.qty+=x.qty;c.n++});
-  SUPPAYS.forEach(x=>{mk(x.sup||'غير محدد').paid+=x.amt});
+  const {p,sp}=supFilters(),m={};
+  const mk=name=>{const raw=name||'غير محدد',k=nz(raw);return m[k]=m[k]||{sup:raw,total:0,paid:0,n:0,qty:0,free:0}};
+  SALES.forEach(x=>{if(sp&&nz(x.sup)!=nz(sp))return;if(p&&x.proj!=p)return;const c=mk(x.sup);c.total+=x.buy;c.qty+=x.qty;c.n++});
+  SUPPAYS.forEach(x=>{
+    if(sp&&nz(x.sup)!=nz(sp))return;
+    if(p&&x.proj!=p){if(!x.proj&&m[nz(x.sup||'غير محدد')])m[nz(x.sup||'غير محدد')].free+=x.amt;return} // مع فلتر مشروع: الدفعة اللي ملهاش مشروع مش بتتحسب
+    mk(x.sup).paid+=x.amt});
   return Object.values(m).map(c=>({...c,debt:c.total-c.paid}));
 }
 function renderSupDebt(){
-  const a=supList().sort((x,y)=>y.debt-x.debt);
+  const a=supList().sort((x,y)=>y.debt-x.debt),{p}=supFilters(),free=sum(a,x=>x.free);
+  $('supDebtNote').innerHTML=p?`<div style="margin:0 0 8px"><span class="chip">مفلتر على مشروع: <b>${esc(p)}</b></span> <small style="color:var(--mu)">— بيتحسب مشتريات المشروع ده والدفعات المسجّلة عليه.${free>0.5?` فيه دفعات بقيمة <b>${fmt(free)}</b> لنفس الموردين من غير مشروع، فمش داخلة هنا (بتظهر في كشف حساب المورد).`:''}</small></div>`:'';
   if(!a.length){$('supDebtT').innerHTML='<tbody><tr><td class="empty">لا توجد بيانات</td></tr></tbody>';return}
   $('supDebtT').innerHTML='<thead><tr><th>المورد</th><th>العمليات</th><th>إجمالي المشتريات</th><th>الكمية</th><th>المدفوع له</th><th>المتبقي له (علينا)</th><th>نسبة السداد</th></tr></thead><tbody>'+
-   a.map(x=>{const pc=x.total?Math.min(100,x.paid/x.total*100):0,bad=x.total==0&&x.paid>0;
+   a.map(x=>{const pc=x.total?Math.min(100,x.paid/x.total*100):0,bad=x.total==0&&x.paid>0&&!p;
     return `<tr class="cl" data-sup="${esc(x.sup)}"><td><b>${esc(x.sup)}</b>${bad?' <span class="badge b-o">اسم غير مسجل في المشتريات</span>':''}</td><td>${x.n}</td><td>${fmt(x.total)}</td><td>${fq(x.qty)}</td><td class="g">${fmt(x.paid)}</td><td class="${x.debt>0.5?'o':'g'}"><b>${fmt(x.debt)}</b></td><td><div class="bar"><i style="width:${pc}%"></i></div>${pc.toFixed(0)}%</td></tr>`}).join('')+
    `</tbody><tfoot><tr><td>الإجمالي</td><td>${sum(a,x=>x.n)}</td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="o">${fmt(sum(a,x=>x.debt))}</td><td>${(sum(a,x=>x.total)?Math.min(100,sum(a,x=>x.paid)/sum(a,x=>x.total)*100):0).toFixed(0)}%</td></tr></tfoot>`;
 }
@@ -729,25 +737,33 @@ function exportPdf(){
 
 /* ====== كشف حساب المورد ====== */
 let CURS=null;
-// لو فيه فلتر مشروع: الكشف بيعرض مشتريات المشروع ده بس. دفعات المورد مش مربوطة بمشروع في الشيت فمش بتظهر مع الفلتر.
+// كشف المورد: مشتريات (بفلتر المشروع لو متحدد) + كل الدفعات. الدفعة المسجّلة على مشروع بتدخل في حسابه،
+// والدفعة من غير مشروع بتظهر في جدول منفصل تحت (مش داخلة في حساب المشروع).
 function supStmt(sup){
-  const nm=x=>x.sup||'غير محدد',proj=$('fProj').value;
-  const pu=SALES.filter(x=>nm(x)==sup&&(!proj||x.proj==proj)),pa=proj?[]:SUPPAYS.filter(x=>nm(x)==sup);
+  const k=nz(sup||'غير محدد'),nm=x=>nz(x.sup||'غير محدد'),proj=$('fProj').value;
+  const pu=SALES.filter(x=>nm(x)==k&&(!proj||x.proj==proj));
+  const allPa=SUPPAYS.filter(x=>nm(x)==k);
+  const pa=proj?allPa.filter(x=>x.proj==proj):allPa,free=proj?allPa.filter(x=>!x.proj):[];
   const ev=[...pu.map(x=>({d:x.date,t:'مشتريات',n:[x.proj,x.client].filter(Boolean).join(' — '),q:x.qty||'',price:PRICE_PER_TON?x.unitBuy:'',buy:x.buy,paid:0})),
-            ...pa.map(x=>({d:x.date,t:'دفعة للمورد',n:x.note,q:'',price:'',buy:0,paid:x.amt}))].sort((a,b)=>(a.d||0)-(b.d||0));
+            ...pa.map(x=>({d:x.date,t:'دفعة للمورد',n:[x.proj,x.note].filter(Boolean).join(' — '),q:'',price:'',buy:0,paid:x.amt}))].sort((a,b)=>(a.d||0)-(b.d||0));
   let bal=0;ev.forEach(e=>{bal+=e.buy-e.paid;e.bal=bal});
-  return {sup,proj,ev,total:sum(ev,e=>e.buy),paid:sum(ev,e=>e.paid),debt:bal,qty:sum(pu,x=>x.qty)};
+  const freeEv=free.map(x=>({d:x.date,n:x.note,paid:x.amt})).sort((a,b)=>(a.d||0)-(b.d||0));
+  return {sup,proj,ev,free:freeEv,freeTotal:sum(freeEv,e=>e.paid),total:sum(ev,e=>e.buy),paid:sum(ev,e=>e.paid),debt:bal,qty:sum(pu,x=>x.qty)};
 }
 function showSupplier(sup,quiet){
   CURS=supStmt(sup);const c=CURS,D=$('supDetail'),P=!!c.proj;
   D.style.display='block';
-  const kp=P?[['مشتريات المشروع',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)']]
-            :[['إجمالي المشتريات',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)'],['المدفوع له',`<span class="g">${fmt(c.paid)}</span>`,'✅','var(--gr)'],['المتبقي له (علينا)',`<span class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</span>`,'⏳',c.debt>0.5?'var(--or)':'var(--gr)']];
-  const note=P?`<div style="margin:8px 0"><span class="chip">مفلتر على مشروع: <b>${esc(c.proj)}</b></span> <small style="color:var(--mu)">— الكشف ده فيه مشتريات المشروع ده بس. دفعات المورد مش مربوطة بمشروع في الشيت فمش ظاهرة هنا؛ المدفوع والمتبقي بيظهروا لما تختار «الكل» في فلتر المشروع.</small></div>`:'';
-  const head=P?'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th>'
-              :'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
-  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?fmt(e.price):''}</td><td>${e.buy?fmt(e.buy):''}</td>`+(P?'':`<td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'o':'g'}">${fmt(e.bal)}</td>`)+'</tr>';
-  const foot=`<tr><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${fmt(c.total)}</td>`+(P?'':`<td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</td>`)+'</tr>';
+  const kp=[[P?'مشتريات المشروع':'إجمالي المشتريات',fmt(c.total),'🛒','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)'],
+    ['المدفوع له',`<span class="g">${fmt(c.paid)}</span>`,'✅','var(--gr)'],
+    ['المتبقي له (علينا)',`<span class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</span>`,'⏳',c.debt>0.5?'var(--or)':'var(--gr)']];
+  const note=P?`<div style="margin:8px 0"><span class="chip">مفلتر على مشروع: <b>${esc(c.proj)}</b></span> <small style="color:var(--mu)">— مشتريات المشروع ده والدفعات المسجّلة عليه. الدفعات اللي من غير مشروع في الجدول اللي تحت.</small></div>`:'';
+  const head='<th>التاريخ</th><th>النوع</th><th>المشروع — العميل / البيان</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
+  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?fmt(e.price):''}</td><td>${e.buy?fmt(e.buy):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'o':'g'}">${fmt(e.bal)}</td></tr>`;
+  const foot=`<tr><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${fmt(c.total)}</td><td class="g">${fmt(c.paid)}</td><td class="${c.debt>0.5?'o':'g'}">${fmt(c.debt)}</td></tr>`;
+  const freeBox=c.free.length?`<h3 class="sub">دفعات للمورد من غير مشروع (مش داخلة في حساب المشروع)</h3>
+    <div class="tw"><table><thead><tr><th>التاريخ</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>${c.free.map(e=>`<tr><td>${dd(e.d)}</td><td>${esc(e.n)}</td><td class="g">${fmt(e.paid)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>الإجمالي</td><td></td><td class="g">${fmt(c.freeTotal)}</td></tr></tfoot></table></div>
+    <small style="color:var(--mu)">لو اتحسبت الدفعات دي على المشروع، المتبقي له يبقى ${fmt(c.debt-c.freeTotal)}.</small>`:'';
   D.innerHTML=`<h2>كشف حساب مورد: ${esc(c.sup)}
     <span style="margin-inline-start:auto;display:flex;gap:6px;flex-wrap:wrap">
       <button class="sm" style="background:#16a34a" onclick="exportSupXlsx()">📊 Excel</button>
@@ -755,31 +771,31 @@ function showSupplier(sup,quiet){
       <button class="sm ghost" onclick="$('supDetail').style.display='none'">إغلاق</button></span></h2>
     ${note}
     <div class="kpis sm">${kp.map(x=>kpi(...x)).join('')}</div>
-    <div class="tw"><table><thead><tr>${head}</tr></thead><tbody>${c.ev.map(row).join('')}</tbody><tfoot>${foot}</tfoot></table></div>`;
+    <div class="tw"><table><thead><tr>${head}</tr></thead><tbody>${c.ev.map(row).join('')}</tbody><tfoot>${foot}</tfoot></table></div>${freeBox}`;
   if(!quiet)D.scrollIntoView({behavior:'smooth'});
 }
 function exportSupXlsx(){
-  if(!CURS||noXlsx())return;const c=CURS,P=!!c.proj,cut=r=>P?r.slice(0,6):r;
-  saveXlsx([['كشف حساب المورد',[['كشف حساب مورد'],['اسم المورد',c.sup],...(P?[['المشروع',c.proj],['ملاحظة','مشتريات المشروع فقط — دفعات المورد مش مربوطة بمشروع']]:[]),['تاريخ الاستخراج',iso(new Date())],[],
-    cut(['التاريخ','النوع','المشروع — العميل','الكمية','سعر الشراء/طن','مشتريات (علينا)','مدفوع له','المتبقي']),
-    ...c.ev.map(e=>cut([iso(e.d),e.t,e.n,e.q===''?'':e.q,e.price||'',e.buy||'',e.paid||'',Math.round(e.bal*100)/100])),
-    [],cut(['الإجمالي','','',r6(c.qty),'',c.total,c.paid,c.debt])],cut([14,14,28,10,14,16,16,16])]],'كشف_حساب_مورد_'+c.sup+(P?'_'+c.proj:'')+'.xlsx');
+  if(!CURS||noXlsx())return;const c=CURS,P=!!c.proj;
+  const freeRows=c.free.length?[[],['دفعات للمورد من غير مشروع (مش داخلة في حساب المشروع)'],['التاريخ','البيان','المبلغ'],...c.free.map(e=>[iso(e.d),e.n,e.paid]),['الإجمالي','',c.freeTotal]]:[];
+  saveXlsx([['كشف حساب المورد',[['كشف حساب مورد'],['اسم المورد',c.sup],...(P?[['المشروع',c.proj]]:[]),['تاريخ الاستخراج',iso(new Date())],[],
+    ['التاريخ','النوع','المشروع — العميل / البيان','الكمية','سعر الشراء/طن','مشتريات (علينا)','مدفوع له','المتبقي'],
+    ...c.ev.map(e=>[iso(e.d),e.t,e.n,e.q===''?'':e.q,e.price||'',e.buy||'',e.paid||'',Math.round(e.bal*100)/100]),
+    [],['الإجمالي','','',r6(c.qty),'',c.total,c.paid,c.debt],...freeRows],[14,14,28,10,14,16,16,16]]],'كشف_حساب_مورد_'+c.sup+(P?'_'+c.proj:'')+'.xlsx');
 }
 function exportSupPdf(){
   if(!CURS)return;const c=CURS,P=!!c.proj,f=n=>Math.round(n).toLocaleString('en-US');
-  const head=P?'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th>'
-              :'<th>التاريخ</th><th>النوع</th><th>المشروع — العميل</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
-  const box=P?`<div class="box"><div>مشتريات المشروع<b>${f(c.total)}</b></div><div>إجمالي الكمية<b>${fq(c.qty)}</b></div></div>`
-             :`<div class="box"><div>إجمالي المشتريات<b>${f(c.total)}</b></div><div>المدفوع له<b class="g">${f(c.paid)}</b></div><div>المتبقي له (علينا)<b class="${c.debt>0.5?'o':'g'}">${f(c.debt)}</b></div></div>`;
-  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?f(e.price):''}</td><td>${e.buy?f(e.buy):''}</td>`+(P?'':`<td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td>`)+'</tr>';
-  const foot=`<tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${f(c.total)}</td>`+(P?'':`<td>${f(c.paid)}</td><td>${f(c.debt)}</td>`)+'</tr>';
+  const head='<th>التاريخ</th><th>النوع</th><th>المشروع — العميل / البيان</th><th>الكمية</th><th>سعر الشراء/طن</th><th>مشتريات (علينا)</th><th>مدفوع له</th><th>المتبقي</th>';
+  const box=`<div class="box"><div>${P?'مشتريات المشروع':'إجمالي المشتريات'}<b>${f(c.total)}</b></div><div>إجمالي الكمية<b>${fq(c.qty)}</b></div><div>المدفوع له<b class="g">${f(c.paid)}</b></div><div>المتبقي له (علينا)<b class="${c.debt>0.5?'o':'g'}">${f(c.debt)}</b></div></div>`;
+  const row=e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.price?f(e.price):''}</td><td>${e.buy?f(e.buy):''}</td><td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td></tr>`;
+  const foot=`<tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td></td><td>${f(c.total)}</td><td>${f(c.paid)}</td><td>${f(c.debt)}</td></tr>`;
+  const freeBox=c.free.length?`<h3>دفعات للمورد من غير مشروع (مش داخلة في حساب المشروع)</h3><table><tr><th>التاريخ</th><th>البيان</th><th>المبلغ</th></tr>${c.free.map(e=>`<tr><td>${dd(e.d)}</td><td>${esc(e.n)}</td><td>${f(e.paid)}</td></tr>`).join('')}<tr class="tot"><td>الإجمالي</td><td></td><td>${f(c.freeTotal)}</td></tr></table>`:'';
   printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>كشف حساب مورد - ${esc(c.sup)}</title><style>${PDF_CSS}</style></head><body>
   <h1>كشف حساب مورد</h1>
-  <p class="meta">اسم المورد: <b>${esc(c.sup)}</b>${P?'<br>المشروع: <b>'+esc(c.proj)+'</b> (مشتريات المشروع فقط — دفعات المورد مش مربوطة بمشروع)':''}<br>تاريخ الاستخراج: ${dd(new Date())}</p>
+  <p class="meta">اسم المورد: <b>${esc(c.sup)}</b>${P?'<br>المشروع: <b>'+esc(c.proj)+'</b>':''}<br>تاريخ الاستخراج: ${dd(new Date())}</p>
   ${box}
   <table><tr>${head}</tr>
   ${c.ev.map(row).join('')}
-  ${foot}</table></body></html>`);
+  ${foot}</table>${freeBox}</body></html>`);
 }
 
 
