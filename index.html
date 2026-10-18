@@ -327,7 +327,8 @@ function parseSheet(h,rows,rn){
   const dateCols=all('التاريخ'),phoneCols=all('تلفون','تليفون','موبايل','هاتف');
   const payAmtCols=all('الدفعه','مبلغ'),advCols=all('مقدم','المدفوع'),supCols=all('المورد'),noteCols=all('ملاحظات');
   const invCols=all('فاتوره'),limCols=all('ئتمان','سقف');
-  const iType=all('نوع')[0]??-1,iProj=all('المشروع')[0]??-1,iDrv=all('السواق')[0]??-1,
+  const projCols=all('مشروع');
+  const iType=all('نوع')[0]??-1,iDrv=all('السواق')[0]??-1,
         iQty=all('الكمية')[0]??-1,iBuy=all('سعر الشراء')[0]??-1,iFrt=all('النولون')[0]??-1,iSale=all('سعر البيع')[0]??-1;
   // عمود اسم العميل: لازم يكون "اسم + العميل" وميكونش عمود النوع ولا التليفون (عشان مايتلخبطش مع "نوع العميل/العملية")
   const okC=i=>!phoneCols.includes(i)&&i!==iType;
@@ -343,13 +344,13 @@ function parseSheet(h,rows,rn){
     const tp=iType>=0?nz(g(iType)):'';
     const date=pdate(first(r,dateCols))||pdate(r[0]);
     if(tp.includes('مورد')){
-      SUPPAYS.push({date,sup:key(first(r,supCols)),proj:key(g(iProj)),amt:payAmt||adv,note:key(first(r,noteCols))});return}
+      SUPPAYS.push({date,sup:key(first(r,supCols)),proj:key(first(r,projCols)),amt:payAmt||adv,note:key(first(r,noteCols))});return}
     const isPay=iType>=0?tp.includes('سداد'):(!sale&&(payAmt>0||adv>0));
     const pk=ph(first(r,phoneCols));
     if(isPay){if(payAmt||adv)PAYS.push({date,pk,amt:payAmt||adv,note:key(first(r,noteCols)),inv:Math.round(num(first(r,invCols)))||0,rn:rowNo});return}
     const client=key(g(iClient)),qty=num(g(iQty));
     if(!sale&&!qty&&!adv&&!client&&!pk)return;               // صف فاضي — تجاهله
-    const o={date,proj:key(g(iProj)),client,phone:pk,driver:key(g(iDrv)),qty,sup:key(first(r,supCols)),adv,rn:rowNo,credit:num(first(r,limCols)),
+    const o={date,proj:key(first(r,projCols)),client,phone:pk,driver:key(g(iDrv)),qty,sup:key(first(r,supCols)),adv,rn:rowNo,credit:num(first(r,limCols)),
       unitBuy:num(g(iBuy)),unitFrt:num(g(iFrt)),unitSale:sale};
     o.pk=pk||(client?'N:'+nz(client):'N:؟');
     o.buy=PRICE_PER_TON?o.unitBuy*qty:o.unitBuy;
@@ -358,7 +359,11 @@ function parseSheet(h,rows,rn){
     o.profit=o.sale-o.buy-o.frt;
     SALES.push(o);
   });
-  prep();
+  canonProj();prep();
+}
+function canonProj(){
+  const m={};[...SALES,...SUPPAYS].forEach(x=>{if(x.proj){const k=nz(x.proj);if(!m[k])m[k]=x.proj}});
+  [...SALES,...SUPPAYS].forEach(x=>{if(x.proj)x.proj=m[nz(x.proj)]});
 }
 function prep(){
   NAMES={};SHEETLIM={};
@@ -373,6 +378,9 @@ function prep(){
   c(PAYS.filter(p=>p.inv&&owner[p.inv]!==p.pk).length,'دفعة مربوطة برقم فاتورة مش موجود أو مش بتاعة نفس العميل (اتوزّعت تلقائيًا FIFO)');
   const sups=new Set(SALES.map(x=>x.sup));
   c(SUPPAYS.filter(p=>!sups.has(p.sup)).length,'دفعة لمورد باسم مش موجود في المشتريات');
+  c(SUPPAYS.filter(p=>!p.proj).length,'دفعة لمورد من غير مشروع (مش هتدخل في حساب مشروع معيّن)');
+  const pj=new Set(SALES.map(x=>nz(x.proj))),odd=[...new Set(SUPPAYS.filter(p=>p.proj&&!pj.has(nz(p.proj))).map(p=>p.proj))];
+  if(odd.length)w.push('دفعات لمورد بمشروع مش موجود في المبيعات: '+odd.slice(0,4).join('، '));
   $('dq').innerHTML=w.length?`<details><summary>⚠️ ملاحظات على جودة البيانات (${w.length})</summary><ul>${w.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`:'';
 }
 
