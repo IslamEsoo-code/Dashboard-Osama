@@ -167,6 +167,7 @@ h3.sub{font-size:14px;margin:16px 0 8px}
     <button data-t="suppliers">🏭 الموردين</button>
     <button data-t="analysis">🔍 تحليل تفصيلي</button>
     <button data-t="transport">🚛 النقل</button>
+    <button data-t="tdebt">🤝 مديونية النقل</button>
     <button data-t="net">💰 صافي الربح</button>
   </nav>
 
@@ -244,12 +245,28 @@ h3.sub{font-size:14px;margin:16px 0 8px}
         <div class="card"><h2>المكسب شهريًا</h2><div class="cv"><canvas id="c8"></canvas></div></div>
         <div class="card"><h2>تحليل حسب الشركة</h2><div class="tw"><table id="trCoT"></table></div></div>
         <div class="card"><h2>تحليل حسب المركب <small>(اضغط على المركب لتصفية الصفحة عليه)</small></h2><div class="tw"><table id="trBoatT"></table></div></div>
+        <div class="card"><h2>تحليل حسب الناقل</h2><div class="tw"><table id="trCarT"></table></div></div>
         <div class="card"><h2>تحليل حسب المصنع</h2><div class="tw"><table id="trFacT"></table></div></div>
         <div class="card"><h2>تحليل حسب السواق</h2><div class="tw"><table id="trDrvT"></table></div></div>
         <div class="card"><h2>تحليل حسب جهة التعتيق</h2><div class="tw"><table id="trDstT"></table></div></div>
       </div>
       <div class="card"><h2>كل الرحلات <small>(المكسب = الكمية × (سعر الطن − (النولون + نسبة الشريك)) — كلهم بالطن)</small></h2><div class="tw"><table id="trListT"></table></div></div>
     </div>
+  </section>
+  <!-- مديونية النقل -->
+  <section class="tab" id="t-tdebt">
+    <div id="tdMsg" style="display:none;margin-bottom:12px;color:var(--rd);font-weight:600"></div>
+    <div class="tools">
+      <button class="ghost sm" onclick="tdInit(true)">🔄 تحديث</button>
+      <small style="color:var(--mu)">عليك = (النولون + نسبة الشريك) × الكمية للناقل — ليك = سعر الطن × الكمية عند العميل. على كل الفترات (مش بيتأثر بفلتر التاريخ).</small>
+    </div>
+    <div class="kpis sm" id="tdKpi"></div>
+    <div class="grid">
+      <div class="card"><h2>عليك للنقّالين <small>(اضغط على الناقل لكشف حسابه)</small></h2><div class="tw"><table id="tdCarT"></table></div></div>
+      <div class="card"><h2>ليك عند العملاء <small>(اضغط على العميل لكشف حسابه)</small></h2><div class="tw"><table id="tdCusT"></table></div></div>
+    </div>
+    <div class="card" id="tdDetail" style="display:none;margin-bottom:14px"></div>
+    <div class="card"><h2>كل المدفوعات والتحصيلات</h2><div class="tw"><table id="tdPayT"></table></div></div>
   </section>
   <!-- صافي الربح -->
   <section class="tab" id="t-net">
@@ -280,6 +297,8 @@ const AUTO_REFRESH_MIN = 5;
 const TRANS_FREIGHT_PER_TON = true;  // النقل: النولون للطن الواحد ويتضرب في الكمية (false = إجمالي الرحلة)
 const SANAD_NAME = 'السند';           // اسم مشروع السند في عمود المشروع (لحساب مكسبه في تابة صافي الربح)
 const TRANS_MAX_QTY = 150;            // أقصى كمية معقولة للرحلة الواحدة (طن). أكبر من كده بتتقسم على 1000 تلقائيًا
+const CUT_PROJECTS = ['بلال'];          // مشاريع ربحك منها = نسبة بتتكتب في عمود «نسبة…» في الشيت (مبلغ للطن × الكمية)
+const CUT_IS_MY_PROFIT = true;           // true: النسبة × الكمية = ربحك. false: النسبة دي حق الطرف التاني وبتتخصم من (بيع − شراء − نولون)
 const NO_SUP_DEBT_PROJECTS = ['بلال'];  // مشاريع مشترياتها مش بتتحسب مديونية للموردين
 const NO_CUST_DEBT_PROJECTS = [];       // مشاريع مبيعاتها مش بتتحسب مديونية للعملاء (فاضية = مشروع بلال بيظهر في العملاء والمديونيات)
 const TRANS_PARTNER_PER_TON = true;  // النقل: نسبة الشريك للطن الواحد وتتضرب في الكمية (false = إجمالي الرحلة)
@@ -362,6 +381,7 @@ function parseSheet(h,rows,rn){
   const payAmtCols=all('الدفعه','مبلغ'),advCols=all('مقدم','المدفوع'),supCols=all('المورد'),noteCols=all('ملاحظات');
   const invCols=all('فاتوره'),limCols=all('ئتمان','سقف');
   const projCols=all('مشروع','مشاريع'); // المشروع / اسم المشروع / المشاريع (جمع)
+  const cutCols=all('نسبه','نسبت','ربحي');   // عمود النسبة (للطن) — مثلًا «نسبة بلال»
   const iType=all('نوع')[0]??-1,iDrv=all('السواق')[0]??-1,
         iQty=all('الكمية')[0]??-1,iBuy=all('سعر الشراء')[0]??-1,iFrt=all('النولون')[0]??-1,iSale=all('سعر البيع')[0]??-1;
   // عمود اسم العميل: لازم يكون "اسم + العميل" وميكونش عمود النوع ولا التليفون (عشان مايتلخبطش مع "نوع العميل/العملية")
@@ -391,6 +411,10 @@ function parseSheet(h,rows,rn){
     o.sale=PRICE_PER_TON?o.unitSale*qty:o.unitSale;
     o.frt=FREIGHT_PER_TON?o.unitFrt*qty:o.unitFrt;
     o.profit=o.sale-o.buy-o.frt;
+    if(CUT_PROJECTS.some(n=>nz(n)==nz(o.proj))){
+      const raw=first(r,cutCols),cut=numQ(raw);o.cut=cut;o.cutMissing=(raw==='');
+      o.profit=CUT_IS_MY_PROFIT?cut*qty:o.profit-cut*qty;   // النسبة (مبلغ للطن) × الكمية
+    }
     SALES.push(o);
   });
   canonProj();prep();
@@ -412,6 +436,7 @@ function prep(){
   c(PAYS.filter(p=>p.inv&&owner[p.inv]!==p.pk).length,'دفعة مربوطة برقم فاتورة مش موجود أو مش بتاعة نفس العميل (اتوزّعت تلقائيًا FIFO)');
   const sups=new Set(SALES.map(x=>x.sup));
   c(SUPPAYS.filter(p=>!sups.has(p.sup)).length,'دفعة لمورد باسم مش موجود في المشتريات');
+  c(SALES.filter(x=>x.cutMissing).length,'عملية على مشروع النسبة (بلال) من غير نسبة في عمود «نسبة…» — الربح فيها بيتحسب من غير نسبة');
   c(SUPPAYS.filter(p=>!p.proj).length,'دفعة لمورد من غير مشروع (مش هتدخل في حساب مشروع معيّن)');
   const pj=new Set(SALES.map(x=>nz(x.proj))),odd=[...new Set(SUPPAYS.filter(p=>p.proj&&!pj.has(nz(p.proj))).map(p=>p.proj))];
   if(odd.length)w.push('دفعات لمورد بمشروع مش موجود في المبيعات: '+odd.slice(0,4).join('، '));
@@ -858,18 +883,24 @@ function parseTrans(h,rows,rn){
   const H=h.map(x=>nz(x).toLowerCase());
   const col=(...ks)=>H.findIndex(x=>ks.some(k=>x.includes(nz(k).toLowerCase())));
   const iD=(()=>{const a=col('التاريخ');return a>=0?a:col('الطابع','timestamp')})(),
-    iCo=col('الشركة'),iBo=col('المركب','مركب'),iFa=col('المصنع'),iDr=col('السواق'),iCar=col('العربية'),iQ=col('الكمية'),
+    iCo=col('الشركة'),iBo=col('المركب','مركب'),iCa=col('الناقل'),iTy=col('الادخال','نوع'),iPty=col('الطرف'),iPm=(()=>{const a=col('الدفعة');return a>=0?a:col('المبلغ')})(),iPn=col('ملاحظات','ملاحظة'),iFa=col('المصنع'),iDr=col('السواق'),iCar=col('العربية'),iQ=col('الكمية'),
     iDe=col('التعتيق'),iRe=col('الافراج'),iFr=col('النولون'),iPa=col('الشريك'),iTo=col('سعر الطن');
   const miss=[['اسم الشركة',iCo],['الكمية',iQ],['النولون',iFr],['نسبة الشريك',iPa],['سعر الطن',iTo]].filter(x=>x[1]<0).map(x=>x[0]);
   if(miss.length)throw new Error('مش لاقي أعمدة النقل ('+miss.join('، ')+') — اتأكد إن الـ Apps Script بيرجّع تبويب النقل وإن أسماء الأعمدة في التبويب زي ما هي.');
-  TRANS=[];TR_FIXED=0;
+  TRANS=[];TPAY=[];TR_FIXED=0;
   rows.forEach((r,idx)=>{
     const g=i=>i>=0?r[i]:'';
+    const ty=nz(g(iTy));
+    if(iTy>=0&&!/رحل/.test(ty)&&/دفع|تحصيل|حصل|استلم|قبض/.test(ty)){   // أي نوع فيه كلمة «رحلة» = رحلة   // صف دفعة/تحصيل (مش رحلة)
+      const amt=num(g(iPm)),party=key(g(iPty));
+      if(amt||party)TPAY.push({date:pdate(g(iD)),kind:/تحصيل|حصل|استلم|قبض|منعميل/.test(ty)?'in':'out',party:party||'غير محدد',amt,note:key(g(iPn)),rn:(rn&&rn[idx])||idx+2});
+      return;
+    }
     let qty=numQ(g(iQ));
     if(qty>TRANS_MAX_QTY&&qty/1000<=TRANS_MAX_QTY){qty=qty/1000;TR_FIXED++}
     const frt=num(g(iFr)),pa=num(g(iPa)),ton=num(g(iTo)),co=key(g(iCo));
     if(!qty&&!frt&&!pa&&!ton&&!co)return;
-    const o={date:pdate(g(iD)),co,boat:key(g(iBo)),factory:key(g(iFa)),driver:key(g(iDr)),car:key(g(iCar)),qty,dest:key(g(iDe)),rel:key(g(iRe)),
+    const o={date:pdate(g(iD)),co,boat:key(g(iBo)),carrier:key(g(iCa)),factory:key(g(iFa)),driver:key(g(iDr)),car:key(g(iCar)),qty,dest:key(g(iDe)),rel:key(g(iRe)),
       frtT:frt,partT:pa,frt:TRANS_FREIGHT_PER_TON?frt*qty:frt,partner:TRANS_PARTNER_PER_TON?pa*qty:pa,ton,rn:(rn&&rn[idx])||idx+2};
     o.cost=ton*qty;                       // إجمالي سعر الطن = سعر الطن × الكمية
     o.profit=o.cost-(o.frt+o.partner);    // المكسب = الكمية × (سعر الطن − (النولون + نسبة الشريك)) — كلهم للطن
@@ -895,7 +926,7 @@ function trDemo(){
   TR_DEMO=true;TRANS=[];
   const C=['سيسكو','العامرية'],F=['مصنع 1','مصنع 2','مصنع 3'],D=['محمود','سيد','عادل'],G=['القاهرة','الجيزة','السويس'];
   for(let i=0;i<40;i++){const q=20+Math.round(Math.random()*20*100)/100,ton=900+Math.round(Math.random()*100),fr=350+Math.round(Math.random()*100),pa=20+Math.round(Math.random()*30);
-    const o={date:new Date(2026,Math.floor(i/10)+6,1+i%28),co:C[i%2],boat:['مركب النور','مركب السلام','مركب الأمل'][i%3],factory:F[i%3],driver:D[i%3],car:'أ ب ج '+(1000+i),qty:q,dest:G[i%3],rel:'R'+(500+i),frtT:fr,partT:pa,frt:fr*q,partner:pa*q,ton,rn:i+2};
+    const o={date:new Date(2026,Math.floor(i/10)+6,1+i%28),co:C[i%2],carrier:['بلال','السند'][i%2],boat:['مركب النور','مركب السلام','مركب الأمل'][i%3],factory:F[i%3],driver:D[i%3],car:'أ ب ج '+(1000+i),qty:q,dest:G[i%3],rel:'R'+(500+i),frtT:fr,partT:pa,frt:fr*q,partner:pa*q,ton,rn:i+2};
     o.cost=o.ton*o.qty;o.profit=o.cost-(o.frt+o.partner);TRANS.push(o)}
   trShow();trFill();renderTrans();
 }
@@ -934,27 +965,30 @@ function renderTrans(){
     tbl(id,heads(label),g.map(o=>{const t=trTotals(o.items);return [esc(o.label),t.n,fq(t.qty),fmt(t.frt),fmt(t.pa),fmt(t.cost),prC(t.pr)]}),
       ['الإجمالي',T.n,fq(T.qty),fmt(T.frt),fmt(T.pa),fmt(T.cost),prC(T.pr)]);
   };
-  grpTable('trCoT','الشركة',x=>x.co);grpTable('trBoatT','المركب',x=>x.boat);grpTable('trFacT','المصنع',x=>x.factory);
+  grpTable('trCoT','الشركة',x=>x.co);grpTable('trBoatT','المركب',x=>x.boat);grpTable('trCarT','الناقل',x=>x.carrier);grpTable('trFacT','المصنع',x=>x.factory);
   document.querySelectorAll('#trBoatT tbody tr').forEach(tr=>{const n=tr.cells[0]&&tr.cells[0].textContent.trim();if(!n||n=='غير محدد')return;tr.style.cursor='pointer';tr.onclick=()=>{const k=nz(n);if([...$('trBoat').options].some(o=>o.value==k)){$('trBoat').value=k;renderTrans()}}});
   grpTable('trDrvT','السواق',x=>x.driver);grpTable('trDstT','جهة التعتيق',x=>x.dest);
   const L=[...d].sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn);
-  tbl('trListT',['التاريخ','الشركة','المركب','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون/طن','نسبة الشريك/طن','سعر الطن','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
-    L.map(x=>[dd(x.date),esc(x.co),esc(x.boat),esc(x.factory),esc(x.driver),esc(x.car),fq(x.qty),esc(x.dest),esc(x.rel),fmt(x.frtT),fmt(x.partT),fmt(x.ton),fmt(x.frt),fmt(x.partner),fmt(x.cost),prC(x.profit)]),
-    ['الإجمالي','','','','','',fq(T.qty),'','','','','',fmt(T.frt),fmt(T.pa),fmt(T.cost),prC(T.pr)]);
+  tbl('trListT',['التاريخ','الشركة','المركب','الناقل','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون/طن','نسبة الشريك/طن','سعر الطن','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
+    L.map(x=>[dd(x.date),esc(x.co),esc(x.boat),esc(x.carrier),esc(x.factory),esc(x.driver),esc(x.car),fq(x.qty),esc(x.dest),esc(x.rel),fmt(x.frtT),fmt(x.partT),fmt(x.ton),fmt(x.frt),fmt(x.partner),fmt(x.cost),prC(x.profit)]),
+    ['الإجمالي','','','','','','',fq(T.qty),'','','','','',fmt(T.frt),fmt(T.pa),fmt(T.cost),prC(T.pr)]);
 }
 function trExportXlsx(){
   if(noXlsx())return;const d=trSel(),T=trTotals(d);
   const L=[...d].sort((a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn);
-  const det=[['التاريخ','الشركة','المركب','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون/طن','نسبة الشريك/طن','سعر الطن','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
-    ...L.map(x=>[iso(x.date),x.co,x.boat,x.factory,x.driver,x.car,r6(x.qty),x.dest,x.rel,x.frtT,x.partT,x.ton,r6(x.frt),r6(x.partner),r6(x.cost),r6(x.profit)]),
-    ['الإجمالي','','','','','',r6(T.qty),'','','','','',r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
+  const det=[['التاريخ','الشركة','المركب','الناقل','المصنع','السواق','رقم العربية','الكمية','جهة التعتيق','رقم الإفراج','النولون/طن','نسبة الشريك/طن','سعر الطن','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
+    ...L.map(x=>[iso(x.date),x.co,x.boat,x.carrier,x.factory,x.driver,x.car,r6(x.qty),x.dest,x.rel,x.frtT,x.partT,x.ton,r6(x.frt),r6(x.partner),r6(x.cost),r6(x.profit)]),
+    ['الإجمالي','','','','','','',r6(T.qty),'','','','','',r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
   const sm=[['الشركة','الرحلات','الكمية','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
     ...grpN(d,x=>x.co).map(o=>{const t=trTotals(o.items);return [o.label,t.n,r6(t.qty),r6(t.frt),r6(t.pa),r6(t.cost),r6(t.pr)]}),
     ['الإجمالي',T.n,r6(T.qty),r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
   const smB=[['المركب','الرحلات','الكمية','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
     ...grpN(d,x=>x.boat).map(o=>{const t=trTotals(o.items);return [o.label,t.n,r6(t.qty),r6(t.frt),r6(t.pa),r6(t.cost),r6(t.pr)]}),
     ['الإجمالي',T.n,r6(T.qty),r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
-  saveXlsx([['الرحلات',det,[12,14,16,16,16,14,10,16,14,12,12,10,14,14,14,14]],['ملخص حسب الشركة',sm,[16,10,10,14,14,14,14]],['ملخص حسب المركب',smB,[20,10,10,14,14,14,14]]],'تقرير_النقل_'+iso(new Date())+'.xlsx');
+  const smC=[['الناقل','الرحلات','الكمية','إجمالي النولون','إجمالي نسبة الشريك','إجمالي سعر الطن','المكسب'],
+    ...grpN(d,x=>x.carrier).map(o=>{const t=trTotals(o.items);return [o.label,t.n,r6(t.qty),r6(t.frt),r6(t.pa),r6(t.cost),r6(t.pr)]}),
+    ['الإجمالي',T.n,r6(T.qty),r6(T.frt),r6(T.pa),r6(T.cost),r6(T.pr)]];
+  saveXlsx([['الرحلات',det,[12,14,16,16,16,16,14,10,16,14,12,12,10,14,14,14,14]],['ملخص حسب الشركة',sm,[16,10,10,14,14,14,14]],['ملخص حسب المركب',smB,[20,10,10,14,14,14,14]],['ملخص حسب الناقل',smC,[20,10,10,14,14,14,14]]],'تقرير_النقل_'+iso(new Date())+'.xlsx');
 }
 function trExportPdf(){
   const d=trSel(),T=trTotals(d),f=n=>Math.round(n).toLocaleString('en-US');
@@ -970,9 +1004,91 @@ function trExportPdf(){
   <table><tr><th>المركب</th><th>الرحلات</th><th>الكمية</th><th>إجمالي النولون</th><th>إجمالي نسبة الشريك</th><th>إجمالي سعر الطن</th><th>المكسب</th></tr>${smRows(x=>x.boat)}
   <tr class="tot"><td>الإجمالي</td><td>${T.n}</td><td>${fq(T.qty)}</td><td>${f(T.frt)}</td><td>${f(T.pa)}</td><td>${f(T.cost)}</td><td>${f(T.pr)}</td></tr></table>
   <h3>الرحلات</h3>
-  <table><tr><th>التاريخ</th><th>الشركة</th><th>المركب</th><th>المصنع</th><th>السواق</th><th>العربية</th><th>الكمية</th><th>جهة التعتيق</th><th>الإفراج</th><th>النولون/طن</th><th>الشريك/طن</th><th>سعر الطن</th><th>إجمالي النولون</th><th>إجمالي الشريك</th><th>إجمالي سعر الطن</th><th>المكسب</th></tr>
-  ${L.map(x=>`<tr><td>${dd(x.date)}</td><td>${esc(x.co)}</td><td>${esc(x.boat)}</td><td>${esc(x.factory)}</td><td>${esc(x.driver)}</td><td>${esc(x.car)}</td><td>${fq(x.qty)}</td><td>${esc(x.dest)}</td><td>${esc(x.rel)}</td><td>${f(x.frtT)}</td><td>${f(x.partT)}</td><td>${f(x.ton)}</td><td>${f(x.frt)}</td><td>${f(x.partner)}</td><td>${f(x.cost)}</td><td>${f(x.profit)}</td></tr>`).join('')}
-  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td></td><td></td><td></td><td>${fq(T.qty)}</td><td></td><td></td><td></td><td></td><td></td><td>${f(T.frt)}</td><td>${f(T.pa)}</td><td>${f(T.cost)}</td><td>${f(T.pr)}</td></tr></table></body></html>`);
+  <table><tr><th>التاريخ</th><th>الشركة</th><th>المركب</th><th>الناقل</th><th>المصنع</th><th>السواق</th><th>العربية</th><th>الكمية</th><th>جهة التعتيق</th><th>الإفراج</th><th>النولون/طن</th><th>الشريك/طن</th><th>سعر الطن</th><th>إجمالي النولون</th><th>إجمالي الشريك</th><th>إجمالي سعر الطن</th><th>المكسب</th></tr>
+  ${L.map(x=>`<tr><td>${dd(x.date)}</td><td>${esc(x.co)}</td><td>${esc(x.boat)}</td><td>${esc(x.carrier)}</td><td>${esc(x.factory)}</td><td>${esc(x.driver)}</td><td>${esc(x.car)}</td><td>${fq(x.qty)}</td><td>${esc(x.dest)}</td><td>${esc(x.rel)}</td><td>${f(x.frtT)}</td><td>${f(x.partT)}</td><td>${f(x.ton)}</td><td>${f(x.frt)}</td><td>${f(x.partner)}</td><td>${f(x.cost)}</td><td>${f(x.profit)}</td></tr>`).join('')}
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td></td><td></td><td></td><td></td><td>${fq(T.qty)}</td><td></td><td></td><td></td><td></td><td></td><td>${f(T.frt)}</td><td>${f(T.pa)}</td><td>${f(T.cost)}</td><td>${f(T.pr)}</td></tr></table></body></html>`);
+}
+
+/* ================= مديونية النقل (عليك للناقل / ليك عند العميل) ================= */
+let TPAY=[],TD_SHOWN=false,TD_CUR=null;
+function demoTPay(){
+  TPAY=[];
+  for(let i=0;i<8;i++)TPAY.push({date:new Date(2026,8+Math.floor(i/4),5+i*3),kind:i%2?'in':'out',party:i%2?['سيسكو','العامرية'][(i>>1)%2]:['بلال','السند'][(i>>1)%2],amt:20000+i*6000,note:'',rn:i+2});
+}
+// الدفعات والتحصيلات بتيجي من نفس تاب النقل (صفوف نوعها «دفعة لناقل» / «تحصيل من عميل»)
+async function tdInit(force){
+  const m=$('tdMsg');m.style.display='none';
+  if(DEMO||TR_DEMO){if(!TRANS.length)trDemo();if(!TPAY.length)demoTPay()}
+  else if(getUrl()&&(!TRANS.length||force)){
+    await trLoad(true);
+    const e=$('trMsg');if(e&&e.style.display==='block'){m.textContent=e.textContent;m.style.display='block'}
+  }
+  renderTd();
+}
+function tdCalc(){
+  const car={},cus={};
+  const ent=(m,raw)=>{const label=key(raw)||'غير محدد',k=nz(label);return m[k]=m[k]||{name:label,n:0,qty:0,due:0,paid:0}};
+  TRANS.forEach(t=>{const a=ent(car,t.carrier);a.n++;a.qty+=t.qty;a.due+=t.frt+t.partner;const c=ent(cus,t.co);c.n++;c.qty+=t.qty;c.due+=t.cost});
+  TPAY.forEach(p=>{ent(p.kind=='out'?car:cus,p.party).paid+=p.amt});
+  const fin=m=>Object.values(m).map(x=>({...x,rem:x.due-x.paid})).sort((a,b)=>b.rem-a.rem);
+  const A=fin(car),B=fin(cus);
+  return {A,B,onMe:sum(A,x=>x.rem),toMe:sum(B,x=>x.rem),paidOut:sum(A,x=>x.paid),paidIn:sum(B,x=>x.paid)};
+}
+function renderTd(){
+  if(!$('tdKpi'))return;
+  const c=tdCalc(),pct=x=>(x.due?Math.min(100,x.paid/x.due*100):0).toFixed(0)+'%',net=c.toMe-c.onMe;
+  $('tdKpi').innerHTML=[
+    ['عليك للنقّالين',`<span class="r">${fmt(c.onMe)}</span>`,'📤','var(--rd)'],['ليك عند العملاء',`<span class="g">${fmt(c.toMe)}</span>`,'📥','var(--gr)'],
+    ['الصافي (ليك − عليك)',prC(net),'⚖️',net>=0?'var(--gr)':'var(--rd)'],
+    ['اللي اتدفع للنقّالين',fmt(c.paidOut),'💸','var(--or)'],['اللي اتحصّل من العملاء',fmt(c.paidIn),'✅','var(--bl)']].map(x=>kpi(...x)).join('');
+  const rows=(L,lab)=>L.map(x=>[esc(x.name),x.n,fq(x.qty),fmt(x.due),`<span class="g">${fmt(x.paid)}</span>`,`<span class="${x.rem>0.5?'r':'g'}">${fmt(x.rem)}</span>`,pct(x)]);
+  const foot=L=>['الإجمالي',sum(L,x=>x.n),fq(sum(L,x=>x.qty)),fmt(sum(L,x=>x.due)),fmt(sum(L,x=>x.paid)),fmt(sum(L,x=>x.rem)),(sum(L,x=>x.due)?Math.min(100,sum(L,x=>x.paid)/sum(L,x=>x.due)*100):0).toFixed(0)+'%'];
+  tbl('tdCarT',['الناقل','الرحلات','الكمية','المستحق له','المدفوع له','المتبقي عليك','نسبة السداد'],rows(c.A),foot(c.A));
+  tbl('tdCusT',['العميل','الرحلات','الكمية','المستحق ليك','المحصّل','المتبقي ليك','نسبة التحصيل'],rows(c.B),foot(c.B));
+  const wire=(id,kind)=>document.querySelectorAll('#'+id+' tbody tr').forEach(tr=>{const n=tr.cells[0]&&tr.cells[0].textContent.trim();if(!n)return;tr.style.cursor='pointer';tr.onclick=()=>tdShow(kind,n)});
+  wire('tdCarT','car');wire('tdCusT','cus');
+  const P=[...TPAY].sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn);
+  tbl('tdPayT',['التاريخ','النوع','الطرف','المبلغ','ملاحظات'],P.map(p=>[dd(p.date),p.kind=='out'?'دفعت لناقل':'حصّلت من عميل',esc(p.party),`<span class="${p.kind=='out'?'o':'g'}">${fmt(p.amt)}</span>`,esc(p.note)]),
+    ['الإجمالي','دفعت: '+fmt(c.paidOut),'تحصيل: '+fmt(c.paidIn),'','']);
+  if(TD_CUR)tdShow(TD_CUR.kind,TD_CUR.name,true);
+}
+function tdStmt(kind,name){
+  const k=nz(name||'غير محدد'),car=kind=='car';
+  const trips=TRANS.filter(t=>nz((car?t.carrier:t.co)||'غير محدد')==k).map(t=>({d:t.date,t:'رحلة',n:[t.boat,t.factory,t.driver].filter(Boolean).join(' — '),q:t.qty,due:car?t.frt+t.partner:t.cost,paid:0}));
+  const pays=TPAY.filter(p=>p.kind==(car?'out':'in')&&nz(p.party)==k).map(p=>({d:p.date,t:car?'دفعة للناقل':'تحصيل من العميل',n:p.note,q:'',due:0,paid:p.amt}));
+  const ev=[...trips,...pays].sort((a,b)=>(a.d||0)-(b.d||0));let bal=0;ev.forEach(e=>{bal+=e.due-e.paid;e.bal=bal});
+  return {kind,name,ev,due:sum(ev,e=>e.due),paid:sum(ev,e=>e.paid),rem:bal,qty:sum(trips,e=>e.q)};
+}
+function tdShow(kind,name,quiet){
+  TD_CUR={kind,name};const c=tdStmt(kind,name),D=$('tdDetail'),car=kind=='car';D.style.display='block';
+  const L=car?{ttl:'كشف حساب ناقل',due:'المستحق له',paid:'المدفوع له',rem:'المتبقي عليك'}:{ttl:'كشف حساب عميل نقل',due:'المستحق ليك',paid:'المحصّل',rem:'المتبقي ليك'};
+  D.innerHTML=`<h2>${L.ttl}: ${esc(c.name)}
+    <span style="margin-inline-start:auto;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="sm" style="background:#16a34a" onclick="tdExportXlsx()">📊 Excel</button>
+      <button class="sm" style="background:#dc2626" onclick="tdExportPdf()">📄 PDF</button>
+      <button class="sm ghost" onclick="TD_CUR=null;$('tdDetail').style.display='none'">إغلاق</button></span></h2>
+    <div class="kpis sm">${[[L.due,fmt(c.due),'🧾','var(--or)'],['إجمالي الكمية',fq(c.qty),'⚖️','var(--bl)'],[L.paid,`<span class="g">${fmt(c.paid)}</span>`,'✅','var(--gr)'],[L.rem,`<span class="${c.rem>0.5?'r':'g'}">${fmt(c.rem)}</span>`,'⏳',c.rem>0.5?'var(--rd)':'var(--gr)']].map(x=>kpi(...x)).join('')}</div>
+    <div class="tw"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>الكمية</th><th>${L.due}</th><th>${L.paid}</th><th>الرصيد</th></tr></thead><tbody>
+    ${c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.due?fmt(e.due):''}</td><td class="g">${e.paid?fmt(e.paid):''}</td><td class="${e.bal>0.5?'r':'g'}">${fmt(e.bal)}</td></tr>`).join('')}
+    </tbody><tfoot><tr><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td>${fmt(c.due)}</td><td class="g">${fmt(c.paid)}</td><td class="${c.rem>0.5?'r':'g'}">${fmt(c.rem)}</td></tr></tfoot></table></div>`;
+  if(!quiet)D.scrollIntoView({behavior:'smooth'});
+}
+function tdExportXlsx(){
+  if(!TD_CUR||noXlsx())return;const c=tdStmt(TD_CUR.kind,TD_CUR.name),car=c.kind=='car';
+  saveXlsx([['الكشف',[[car?'كشف حساب ناقل':'كشف حساب عميل نقل'],['الاسم',c.name],['تاريخ الاستخراج',iso(new Date())],[],
+    ['التاريخ','النوع','البيان','الكمية',car?'المستحق له':'المستحق ليك',car?'المدفوع له':'المحصّل','الرصيد'],
+    ...c.ev.map(e=>[iso(e.d),e.t,e.n,e.q===''?'':r6(e.q),e.due||'',e.paid||'',Math.round(e.bal*100)/100]),
+    [],['الإجمالي','','',r6(c.qty),c.due,c.paid,c.rem]],[14,18,34,10,16,16,16]]],'كشف_نقل_'+c.name+'.xlsx');
+}
+function tdExportPdf(){
+  if(!TD_CUR)return;const c=tdStmt(TD_CUR.kind,TD_CUR.name),car=c.kind=='car',f=n=>Math.round(n).toLocaleString('en-US');
+  const L=car?['المستحق له','المدفوع له','المتبقي عليك']:['المستحق ليك','المحصّل','المتبقي ليك'];
+  printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>كشف نقل - ${esc(c.name)}</title><style>${PDF_CSS}</style></head><body>
+  <h1>${car?'كشف حساب ناقل':'كشف حساب عميل نقل'}</h1><p class="meta">الاسم: <b>${esc(c.name)}</b><br>تاريخ الاستخراج: ${dd(new Date())}</p>
+  <div class="box"><div>${L[0]}<b>${f(c.due)}</b></div><div>الكمية<b>${fq(c.qty)}</b></div><div>${L[1]}<b class="g">${f(c.paid)}</b></div><div>${L[2]}<b class="${c.rem>0.5?'r':'g'}">${f(c.rem)}</b></div></div>
+  <table><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>الكمية</th><th>${L[0]}</th><th>${L[1]}</th><th>الرصيد</th></tr>
+  ${c.ev.map(e=>`<tr><td>${dd(e.d)}</td><td>${e.t}</td><td>${esc(e.n)}</td><td>${e.q?fq(e.q):''}</td><td>${e.due?f(e.due):''}</td><td>${e.paid?f(e.paid):''}</td><td>${f(e.bal)}</td></tr>`).join('')}
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qty)}</td><td>${f(c.due)}</td><td>${f(c.paid)}</td><td>${f(c.rem)}</td></tr></table></body></html>`);
 }
 
 /* ================= صافي الربح (السند + النقل − المصروفات) ================= */
@@ -1086,6 +1202,7 @@ $('tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.id=='t-'+b.dataset.t));
   if(b.dataset.t=='transport'&&!TR_SHOWN){TR_SHOWN=true;trShow();trLoad()}
   if(b.dataset.t=='net'){NET_SHOWN=true;netInit()}
+  if(b.dataset.t=='tdebt'){TD_SHOWN=true;tdInit()}
   Object.values(charts).forEach(c=>c.resize())};
 ['trCo','trBoat','trFac'].forEach(id=>$(id).onchange=renderTrans);
 $('debtT').onclick=e=>{
@@ -1096,7 +1213,7 @@ $('debtT').onclick=e=>{
 };
 $('supDebtT').onclick=e=>{const tr=e.target.closest('tr.cl');if(tr)showSupplier(tr.dataset.sup)};
 load();
-setInterval(()=>{if(getUrl())load();if(trUrl()&&TR_SHOWN)trLoad(true);if(NET_SHOWN)netInit(true)},AUTO_REFRESH_MIN*60*1000);
+setInterval(()=>{if(getUrl())load();if(trUrl()&&TR_SHOWN)trLoad(true);if(NET_SHOWN)netInit(true);if(TD_SHOWN)tdInit(true)},AUTO_REFRESH_MIN*60*1000);
 </script>
 </body>
 </html>
