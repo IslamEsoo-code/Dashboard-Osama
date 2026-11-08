@@ -286,6 +286,7 @@ h3.sub{font-size:14px;margin:16px 0 8px}
     </div>
     <div class="card"><h2>رحلات النقل <small>(نسبة الشريك للطن × الكمية)</small></h2><div class="tw"><table id="cutTrListT"></table></div></div>
     <div class="card"><h2>عمليات بلال <small>(نسبة بلال للطن × الكمية)</small></h2><div class="tw"><table id="cutListT"></table></div></div>
+    <div class="card"><h2>نسبة الإدارة <small>(من المصروفات — البند فيه كلمة «إدارة»)</small></h2><div class="tw"><table id="cutAdT"></table></div></div>
   </section>
   <!-- صافي الربح -->
   <section class="tab" id="t-net">
@@ -1117,34 +1118,40 @@ function tdExportPdf(){
 
 /* ================= النسب: نسبة الشريك (شغل النقل) + نسبة بلال ================= */
 let CUT_SHOWN=false;
+const ADMIN_EXP_KEY='نسبة اداره';   // أي مصروف البند بتاعه فيه الكلمة دي = نسبة الإدارة (من شغل بلال)
+const isAdminExp=e=>nz(e.item).includes(nz(ADMIN_EXP_KEY));
 const isCutProj=x=>CUT_PROJECTS.some(n=>nz(n)==nz(x.proj));
 const cutInRange=x=>{const {f,t}=rng();return (!f||(x.date&&x.date>=f))&&(!t||(x.date&&x.date<t))};
 const cutAmt=x=>(x.cut||0)*x.qty;
 async function cutInit(force){
   if(DEMO||TR_DEMO){if(!TRANS.length)trDemo()}
   else if(getUrl()&&(!TRANS.length||force))await trLoad(true);
+  await exLoad(force);
   renderCut();
 }
 function cutCalc(){
   const b=SALES.filter(x=>isCutProj(x)&&cutInRange(x)),t=TRANS.filter(cutInRange);
   const qB=sum(b,x=>x.qty),qB2=sum(b.filter(x=>!x.cutMissing),x=>x.qty),mB=sum(b,cutAmt),qT=sum(t,x=>x.qty),mT=sum(t,x=>x.partner);
-  return {b,t,qB,qB2,mB,qT,mT,aB:qB2?mB/qB2:0,aT:qT?mT/qT:0,miss:b.filter(x=>x.cutMissing).length,Q:qB+qT,M:mB+mT};
+  const ad=EXP.filter(e=>cutInRange(e)&&isAdminExp(e)),mA=sum(ad,e=>e.amt),mBA=mB+mA;
+  return {b,t,ad,qB,qB2,mB,qT,mT,mA,mBA,aA:qB?mA/qB:0,aBA:qB?mBA/qB:0,aB:qB2?mB/qB2:0,aT:qT?mT/qT:0,miss:b.filter(x=>x.cutMissing).length,Q:qB+qT,M:mB+mT+mA};
 }
-function cutSumRows(c){return [['نسبة الشريك — شغل النقل',c.qT,c.aT,c.mT],['نسبة بلال — شغل بلال',c.qB,c.aB,c.mB]]}
+function cutSumRows(c){return [['نسبة الشريك — شغل النقل',c.qT,c.aT,c.mT],['نسبة بلال — شغل بلال',c.qB,c.aB,c.mB],['نسبة الإدارة — من شغل بلال (من المصروفات)',c.qB,c.aA,c.mA],['إجمالي بلال + الإدارة',c.qB,c.aBA,c.mBA,1]]}
 function renderCut(){
   if(!$('cutKpi'))return;
   const c=cutCalc();
-  $('cutNote').textContent=`شغل النقل: نسبة الشريك من تابة النقل — شغل بلال: عمود «${CUT_COL||'مش لاقي عمود فيه كلمة نسبة'}» لمشروع «${CUT_PROJECTS.join('، ')}». الفلتر الزمني فوق بيشتغل هنا.`;
+  $('cutNote').textContent=`شغل النقل: نسبة الشريك من تابة النقل — شغل بلال: عمود «${CUT_COL||'مش لاقي عمود فيه كلمة نسبة'}» لمشروع «${CUT_PROJECTS.join('، ')}». نسبة الإدارة: من المصروفات (البند فيه «إدارة») وبتتحسب على كمية شغل بلال. الفلتر الزمني فوق بيشتغل هنا.`;
   $('cutKpi').innerHTML=[
     ['نسبة الشريك (شغل النقل)',prC(c.mT),'🚛','var(--pr)'],['نسبة بلال (شغل بلال)',prC(c.mB),'🏗️','var(--bl)'],
-    ['إجمالي النسبتين',prC(c.M),'🧮','var(--gr)'],['إجمالي الكمية',fq(c.Q),'⚖️','var(--or)'],
+    ['نسبة الإدارة (من شغل بلال)',prC(c.mA),'🏢','var(--or)'],['إجمالي بلال + الإدارة',prC(c.mBA),'🧮','var(--gr)'],
+    ['إجمالي كل النسب',prC(c.M),'💰','var(--gr)'],['إجمالي الكمية',fq(c.Q),'⚖️','var(--or)'],
     ['عمليات بلال من غير نسبة',c.miss?`<span class="r">${c.miss}</span>`:'0','⚠️',c.miss?'var(--rd)':'var(--gr)']].map(x=>kpi(...x)).join('');
-  tbl('cutSumT',['المصدر','الكمية','النسبة للطن (متوسط)','الفلوس'],cutSumRows(c).map(r=>[r[0],fq(r[1]),fmt(r[2]),fmt(r[3])]),['الإجمالي',fq(c.Q),fmt(c.Q?c.M/c.Q:0),fmt(c.M)]);
+  tbl('cutSumT',['المصدر','الكمية','النسبة للطن (متوسط)','الفلوس'],cutSumRows(c).map(r=>{const x=[r[0],fq(r[1]),fmt(r[2]),fmt(r[3])];return r[4]?x.map(v=>`<b>${v}</b>`):x}),['الإجمالي (الكل)',fq(c.Q),fmt(c.Q?c.M/c.Q:0),fmt(c.M)]);
   const mo={},mk=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-  c.t.forEach(x=>{if(x.date){const m=mk(x.date);(mo[m]=mo[m]||{t:0,b:0}).t+=x.partner}});
-  c.b.forEach(x=>{if(x.date){const m=mk(x.date);(mo[m]=mo[m]||{t:0,b:0}).b+=cutAmt(x)}});
+  c.t.forEach(x=>{if(x.date){const m=mk(x.date);(mo[m]=mo[m]||{t:0,b:0,a:0}).t+=x.partner}});
+  c.b.forEach(x=>{if(x.date){const m=mk(x.date);(mo[m]=mo[m]||{t:0,b:0,a:0}).b+=cutAmt(x)}});
+  c.ad.forEach(e=>{if(e.date){const m=mk(e.date);(mo[m]=mo[m]||{t:0,b:0,a:0}).a+=e.amt}});
   const ms=Object.keys(mo).sort();
-  chart('c10','bar',ms,[{label:'نسبة الشريك (النقل)',data:ms.map(m=>mo[m].t),backgroundColor:'#a78bfa',borderRadius:6},{label:'نسبة بلال',data:ms.map(m=>mo[m].b),backgroundColor:'#60a5fa',borderRadius:6}]);
+  chart('c10','bar',ms,[{label:'نسبة الشريك (النقل)',data:ms.map(m=>mo[m].t),backgroundColor:'#a78bfa',borderRadius:6},{label:'نسبة بلال',data:ms.map(m=>mo[m].b),backgroundColor:'#60a5fa',borderRadius:6},{label:'نسبة الإدارة',data:ms.map(m=>mo[m].a),backgroundColor:'#f59e0b',borderRadius:6}]);
   const gT=grpN(c.t,x=>x.co).sort((a,b)=>sum(b.items,x=>x.partner)-sum(a.items,x=>x.partner));
   tbl('cutTrT',['الشركة','الرحلات','الكمية','النسبة للطن (متوسط)','إجمالي النسبة'],gT.map(o=>{const a=sum(o.items,x=>x.partner),q=sum(o.items,x=>x.qty);return [esc(o.label),o.items.length,fq(q),fmt(q?a/q:0),fmt(a)]}),['الإجمالي',c.t.length,fq(c.qT),fmt(c.aT),fmt(c.mT)]);
   const gB=grpN(c.b,x=>x.client).sort((a,b)=>sum(b.items,cutAmt)-sum(a.items,cutAmt));
@@ -1155,29 +1162,34 @@ function renderCut(){
   tbl('cutListT',['التاريخ','العميل','السواق','الكمية','النسبة/طن','إجمالي النسبة'],
     [...c.b].sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn).map(x=>[dd(x.date),esc(x.client),esc(x.driver),fq(x.qty),x.cutMissing?'<span class="r">—</span>':fmt(x.cut),fmt(cutAmt(x))]),
     ['الإجمالي','','',fq(c.qB),fmt(c.aB),fmt(c.mB)]);
+  tbl('cutAdT',['التاريخ','الجهة','البند','المبلغ','ملاحظات'],[...c.ad].sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn).map(e=>[dd(e.date),netLabel[netKind(e.ent)],esc(e.item),fmt(e.amt),esc(e.note)]),['الإجمالي','','',fmt(c.mA),'']);
 }
 function cutExportXlsx(){
   if(noXlsx())return;const c=cutCalc(),asc=(a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn;
   saveXlsx([
-    ['ملخص النسب',[['المصدر','الكمية','النسبة للطن (متوسط)','الفلوس'],...cutSumRows(c).map(r=>[r[0],r6(r[1]),r6(r[2]),r6(r[3])]),['الإجمالي',r6(c.Q),r6(c.Q?c.M/c.Q:0),r6(c.M)]],[30,12,20,14]],
+    ['ملخص النسب',[['المصدر','الكمية','النسبة للطن (متوسط)','الفلوس'],...cutSumRows(c).map(r=>[r[0],r6(r[1]),r6(r[2]),r6(r[3])]),['الإجمالي (الكل)',r6(c.Q),r6(c.Q?c.M/c.Q:0),r6(c.M)]],[40,12,20,14]],
     ['شغل النقل',[['التاريخ','الشركة','الناقل','المركب','الكمية','نسبة الشريك/طن','إجمالي النسبة'],...[...c.t].sort(asc).map(x=>[iso(x.date),x.co,x.carrier,x.boat,r6(x.qty),x.partT,r6(x.partner)]),['الإجمالي','','','',r6(c.qT),r6(c.aT),r6(c.mT)]],[12,14,14,16,10,14,14]],
-    ['شغل بلال',[['التاريخ','العميل','السواق','الكمية','النسبة/طن','إجمالي النسبة'],...[...c.b].sort(asc).map(x=>[iso(x.date),x.client,x.driver,r6(x.qty),x.cutMissing?'':x.cut,r6(cutAmt(x))]),['الإجمالي','','',r6(c.qB),r6(c.aB),r6(c.mB)]],[12,22,18,10,12,14]]
+    ['شغل بلال',[['التاريخ','العميل','السواق','الكمية','النسبة/طن','إجمالي النسبة'],...[...c.b].sort(asc).map(x=>[iso(x.date),x.client,x.driver,r6(x.qty),x.cutMissing?'':x.cut,r6(cutAmt(x))]),['الإجمالي','','',r6(c.qB),r6(c.aB),r6(c.mB)]],[12,22,18,10,12,14]],
+    ['نسبة الإدارة',[['التاريخ','الجهة','البند','المبلغ','ملاحظات'],...[...c.ad].sort(asc).map(e=>[iso(e.date),netLabel[netKind(e.ent)],e.item,e.amt,e.note]),['الإجمالي','','',r6(c.mA),'']],[12,12,20,14,30]]
   ],'النسب_'+iso(new Date())+'.xlsx');
 }
 function cutExportPdf(){
   const c=cutCalc(),f=n=>Math.round(n).toLocaleString('en-US'),asc=(a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn;
   printHtml(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>النسب</title><style>${PDF_CSS}</style></head><body>
-  <h1>النسب — نسبة الشريك (النقل) + نسبة بلال</h1><p class="meta">تاريخ الاستخراج: ${dd(new Date())}</p>
-  <div class="box"><div>نسبة الشريك (النقل)<b>${f(c.mT)}</b></div><div>نسبة بلال<b>${f(c.mB)}</b></div><div>الإجمالي<b class="g">${f(c.M)}</b></div></div>
+  <h1>النسب — نسبة الشريك (النقل) + نسبة بلال + نسبة الإدارة</h1><p class="meta">تاريخ الاستخراج: ${dd(new Date())}</p>
+  <div class="box"><div>نسبة الشريك (النقل)<b>${f(c.mT)}</b></div><div>نسبة بلال<b>${f(c.mB)}</b></div><div>نسبة الإدارة<b>${f(c.mA)}</b></div><div>بلال + الإدارة<b>${f(c.mBA)}</b></div><div>الإجمالي<b class="g">${f(c.M)}</b></div></div>
   <table><tr><th>المصدر</th><th>الكمية</th><th>النسبة للطن (متوسط)</th><th>الفلوس</th></tr>
   ${cutSumRows(c).map(r=>`<tr><td>${r[0]}</td><td>${fq(r[1])}</td><td>${f(r[2])}</td><td>${f(r[3])}</td></tr>`).join('')}
-  <tr class="tot"><td>الإجمالي</td><td>${fq(c.Q)}</td><td>${f(c.Q?c.M/c.Q:0)}</td><td>${f(c.M)}</td></tr></table>
+  <tr class="tot"><td>الإجمالي (الكل)</td><td>${fq(c.Q)}</td><td>${f(c.Q?c.M/c.Q:0)}</td><td>${f(c.M)}</td></tr></table>
   <h3>شغل النقل</h3><table><tr><th>التاريخ</th><th>الشركة</th><th>الناقل</th><th>المركب</th><th>الكمية</th><th>نسبة الشريك/طن</th><th>إجمالي النسبة</th></tr>
   ${[...c.t].sort(asc).map(x=>`<tr><td>${dd(x.date)}</td><td>${esc(x.co)}</td><td>${esc(x.carrier)}</td><td>${esc(x.boat)}</td><td>${fq(x.qty)}</td><td>${f(x.partT)}</td><td>${f(x.partner)}</td></tr>`).join('')}
   <tr class="tot"><td>الإجمالي</td><td></td><td></td><td></td><td>${fq(c.qT)}</td><td>${f(c.aT)}</td><td>${f(c.mT)}</td></tr></table>
   <h3>شغل بلال</h3><table><tr><th>التاريخ</th><th>العميل</th><th>السواق</th><th>الكمية</th><th>النسبة/طن</th><th>إجمالي النسبة</th></tr>
   ${[...c.b].sort(asc).map(x=>`<tr><td>${dd(x.date)}</td><td>${esc(x.client)}</td><td>${esc(x.driver)}</td><td>${fq(x.qty)}</td><td>${x.cutMissing?'—':f(x.cut)}</td><td>${f(cutAmt(x))}</td></tr>`).join('')}
-  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qB)}</td><td>${f(c.aB)}</td><td>${f(c.mB)}</td></tr></table></body></html>`);
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${fq(c.qB)}</td><td>${f(c.aB)}</td><td>${f(c.mB)}</td></tr></table>
+  <h3>نسبة الإدارة (من المصروفات)</h3><table><tr><th>التاريخ</th><th>الجهة</th><th>البند</th><th>المبلغ</th><th>ملاحظات</th></tr>
+  ${[...c.ad].sort(asc).map(e=>`<tr><td>${dd(e.date)}</td><td>${netLabel[netKind(e.ent)]}</td><td>${esc(e.item)}</td><td>${f(e.amt)}</td><td>${esc(e.note)}</td></tr>`).join('')}
+  <tr class="tot"><td>الإجمالي</td><td></td><td></td><td>${f(c.mA)}</td><td></td></tr></table></body></html>`);
 }
 
 /* ================= صافي الربح (السند + النقل − المصروفات) ================= */
@@ -1202,6 +1214,7 @@ const netLabel={sa:'السند',tr:'النقل',ot:'غير محدد'};
 function demoExp(){
   EXP=[];const it=['مرتبات','وقود','صيانة','إيجار'];
   for(let i=0;i<14;i++)EXP.push({date:new Date(2026,Math.floor(i/5)+7,3+i),ent:i%2?'النقل':'السند',item:it[i%4],amt:2000+i*350,note:'',rn:i+2});
+  for(let i=0;i<3;i++)EXP.push({date:new Date(2026,7+i,10),ent:'السند',item:'نسبة الإدارة',amt:1500+i*500,note:'',rn:20+i});
 }
 async function exLoad(force){
   const m=$('netMsg');m.style.display='none';
