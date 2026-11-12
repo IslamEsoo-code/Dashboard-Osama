@@ -340,7 +340,7 @@ const LIMIT_WARN_PCT = 80;        // تنبيه مبكر لما العميل ي�
    سعر الشراء | النولون | سعر البيع | المدفوع | ملاحظات
    اختياري: رقم الفاتورة (في السداد) لربط الدفعة بفاتورة | الحد الائتماني (في البيع) */
 
-let SALES=[],PAYS=[],SUPPAYS=[],NAMES={},SHEETLIM={},charts={},sortKey='debt',sortDir=-1,DEMO=false,CUR=null,LASTLIST=[];
+let LASTROW=0,SALES=[],PAYS=[],SUPPAYS=[],NAMES={},SHEETLIM={},charts={},sortKey='debt',sortDir=-1,DEMO=false,CUR=null,LASTLIST=[];
 const $=id=>document.getElementById(id);
 const fmt=n=>isFinite(n)?Math.round(n).toLocaleString('en-US'):'0';
 const r6=n=>Math.round((+n||0)*1e6)/1e6; // يشيل أخطاء الجمع العشري بدون تقريب فعلي
@@ -503,6 +503,7 @@ async function load(force){
       const j=await res.json();
       if(j.error)throw new Error(j.error);
       parseSheet(j.headers||[],j.rows||[],j.rowNums);
+      LASTROW=(j.rowNums&&j.rowNums.length)?j.rowNums[j.rowNums.length-1]:(j.rows||[]).length+1;
       store.set(CACHE_KEY,JSON.stringify({headers:j.headers||[],rows:j.rows||[],rowNums:j.rowNums||null}));
     }
   }catch(e){
@@ -511,7 +512,7 @@ async function load(force){
     if($('app').style.display==='block'){note(m,'err');return}
     showConnect(m);return}
   reveal();
-  $('upd').textContent='آخر تحديث: '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' — '+new Date().toLocaleDateString('en-GB');
+  $('upd').textContent='آخر تحديث: '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' — '+new Date().toLocaleDateString('en-GB')+(LASTROW?' — آخر صف اتقرا من الشيت: رقم '+LASTROW:'');
   setStatus('متصل',false);
   if(url&&force)note('✅ تم التحديث — '+SALES.length+' عملية بيع و '+PAYS.length+' دفعة سداد','ok',5000);
 }
