@@ -201,6 +201,18 @@ h3.sub{font-size:14px;margin:16px 0 8px}
       <div class="tw"><table id="debtT"></table></div>
     </div>
     <div class="card" id="detail" style="display:none"></div>
+    <div class="card" style="margin-top:14px">
+      <h2>تقرير سعر الشراء وسعر البيع والفرق <small>(بالطن — بيتأثر بالفلتر الزمني والمشروع والمورد فوق)</small></h2>
+      <div class="kpis sm" id="kpiPrice"></div>
+      <div class="tools">
+        <input type="search" id="priceSearch" placeholder="🔍 ابحث باسم العميل أو المورد">
+        <button class="ghost sm" onclick="exportPrices()">📊 تصدير التقرير Excel</button>
+      </div>
+      <h3 style="margin:10px 0 6px;font-size:14px">ملخص حسب العميل</h3>
+      <div class="tw"><table id="priceCliT"></table></div>
+      <h3 style="margin:14px 0 6px;font-size:14px">تفاصيل العمليات</h3>
+      <div class="tw"><table id="priceOpT"></table></div>
+    </div>
   </section>
 
   <!-- الموردين -->
@@ -362,8 +374,19 @@ function pdate(v){
   let m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if(m)return new Date(+m[1],m[2]-1,+m[3]);
   m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if(m)return new Date(+m[3],m[2]-1,+m[1]);
+  if(m){const a=+m[1],b=+m[2],mdy=a>12?false:b>12?true:DATE_MDY;   // أول رقم > 12 = يوم، تاني رقم > 12 = يوم، غير كده بحسب شكل الشيت
+    return mdy?new Date(+m[3],a-1,b):new Date(+m[3],b-1,a)}
   const d=new Date(v);return isNaN(d)?null:d;
+}
+// بيكتشف الشيت بيكتب التاريخ يوم/شهر/سنة ولا شهر/يوم/سنة (من التواريخ اللي رقمها أكبر من 12، أو اللي في المستقبل لو اتقرت غلط)
+let DATE_MDY=false;
+function detectMdy(vals){
+  const lim=Date.now()+864e5;let dmy=0,mdy=0;
+  vals.forEach(v=>{if(typeof v!='string')return;const m=v.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);if(!m)return;
+    const a=+m[1],b=+m[2],y=+m[3];
+    if(a>12&&b<=12)dmy++;else if(b>12&&a<=12)mdy++;
+    else if(a!=b){const x=new Date(y,b-1,a)>lim,z=new Date(y,a-1,b)>lim;if(x&&!z)mdy++;else if(z&&!x)dmy++}});
+  return mdy>dmy;
 }
 function ph(v){
   let d=String(v||'').replace(/[٠-٩]/g,x=>'٠١٢٣٤٥٦٧٨٩'.indexOf(x)).replace(/\D/g,'');
@@ -400,6 +423,7 @@ function parseSheet(h,rows,rn){
   const payAmtCols=all('الدفعه','مبلغ'),advCols=all('مقدم','المدفوع'),supCols=all('المورد'),noteCols=all('ملاحظات');
   const invCols=all('فاتوره'),limCols=all('ئتمان','سقف');
   const projCols=all('مشروع','مشاريع'); // المشروع / اسم المشروع / المشاريع (جمع)
+  DATE_MDY=detectMdy(rows.flatMap(r=>[...dateCols.map(i=>r[i]),r[0]]));
   const cutCols=all('نسبه','نسبت','ربحي');   // عمود النسبة (للطن) — مثلًا «نسبة بلال»
   CUT_COL=cutCols.map(i=>String(h[i]).trim()).join('، ');
   const iType=all('نوع')[0]??-1,iDrv=all('السواق')[0]??-1,
@@ -585,7 +609,7 @@ function render(){
   tbl('supT',['المورد','العمليات','الكمية','المشتريات','متوسط السعر/طن'],sk.map(k=>[esc(k),sp[k].length,fq(sum(sp[k],x=>x.qty)),total(sp[k],x=>x.buy),fmt(sum(sp[k],x=>x.buy)/(sum(sp[k],x=>x.qty)||1))]),['الإجمالي',d.length,fq(qty),fmt(buy),fmt(buy/(qty||1))]);
   tbl('drvT',['السواق','الرحلات','الكمية','النولون','متوسط النولون/رحلة'],dk.map(k=>[esc(k),dr[k].length,fq(sum(dr[k],x=>x.qty)),total(dr[k],x=>x.frt),fmt(sum(dr[k],x=>x.frt)/dr[k].length)]),['الإجمالي',d.length,fq(qty),fmt(frt),fmt(d.length?frt/d.length:0)]);
   tbl('prjT',['المشروع','العمليات','المبيعات','المكسب','الهامش'],pk.map(k=>{const s=sum(pj[k],x=>x.sale),p=sum(pj[k],x=>x.profit);return[esc(k),pj[k].length,fmt(s),`<span class="${p>=0?'g':'r'}">${fmt(p)}</span>`,(s?p/s*100:0).toFixed(1)+'%']}),['الإجمالي',d.length,fmt(sale),`<span class="${pr>=0?'g':'r'}">${fmt(pr)}</span>`,(sale?pr/sale*100:0).toFixed(1)+'%']);
-  renderDebt();renderSupDebt();
+  renderDebt();renderSupDebt();renderPrices();
   if(TRANS.length)renderTrans();
   if(NET_SHOWN)renderNet();
   renderCut();
@@ -749,6 +773,41 @@ function renderDebt(){
    :'<tr><td colspan="12" class="empty">لا يوجد عملاء مطابقين</td></tr>')+
    `</tbody><tfoot><tr><td>الإجمالي (${a.length} عميل)</td><td></td><td>${fmt(sum(a,x=>x.total))}</td><td>${fq(sum(a,x=>x.qty))}</td><td class="g">${fmt(sum(a,x=>x.paid))}</td><td class="r">${fmt(sum(a,x=>x.debt))}</td><td></td><td></td><td>${(sum(a,x=>x.total)?sum(a,x=>x.paid)/sum(a,x=>x.total)*100:0).toFixed(0)}%</td><td></td><td></td><td></td></tr></tfoot>`;
 }
+/* ====== تقرير سعر الشراء والبيع والفرق ====== */
+function priceRows(){
+  const {f,t}=rng(),q=($('priceSearch')?$('priceSearch').value:'').trim().toLowerCase();
+  return select(f,t).filter(x=>!q||String(x.client).toLowerCase().includes(q)||String(x.sup).toLowerCase().includes(q))
+    .sort((a,b)=>(b.date||0)-(a.date||0)||b.rn-a.rn);
+}
+const perT=(a,q)=>q?a/q:0;
+function renderPrices(){
+  if(!$('priceOpT'))return;
+  const d=priceRows(),qty=sum(d,x=>x.qty),buy=sum(d,x=>x.buy),sale=sum(d,x=>x.sale),diff=sale-buy;
+  const cls=v=>v>=0?'g':'r';
+  $('kpiPrice').innerHTML=[
+    ['متوسط سعر الشراء/طن',fmt(perT(buy,qty)),'🛒','var(--or)'],['متوسط سعر البيع/طن',fmt(perT(sale,qty)),'💰','var(--bl)'],
+    ['الفرق/طن',`<span class="${cls(diff)}">${fmt(perT(diff,qty))}</span>`,'📏','var(--gr)'],['إجمالي الفرق (بيع − شراء)',`<span class="${cls(diff)}">${fmt(diff)}</span>`,'🧮','var(--gr)']
+  ].map(x=>kpi(...x)).join('');
+  const g=group(d,x=>x.pk),ks=Object.keys(g).sort((a,b)=>sum(g[b],x=>x.sale-x.buy)-sum(g[a],x=>x.sale-x.buy));
+  tbl('priceCliT',['العميل','العمليات','الكمية','متوسط الشراء/طن','متوسط البيع/طن','الفرق/طن','إجمالي الفرق'],
+    ks.map(k=>{const a=g[k],q=sum(a,x=>x.qty),b=sum(a,x=>x.buy),s=sum(a,x=>x.sale);
+      return [esc(NAMES[k]||k),a.length,fq(q),fmt(perT(b,q)),fmt(perT(s,q)),`<span class="${cls(s-b)}">${fmt(perT(s-b,q))}</span>`,`<span class="${cls(s-b)}"><b>${fmt(s-b)}</b></span>`]}),
+    ['الإجمالي',d.length,fq(qty),fmt(perT(buy,qty)),fmt(perT(sale,qty)),fmt(perT(diff,qty)),fmt(diff)]);
+  tbl('priceOpT',['التاريخ','العميل','المشروع','المورد','الكمية','سعر الشراء/طن','سعر البيع/طن','الفرق/طن','إجمالي الفرق'],
+    d.map(x=>{const df=x.sale-x.buy;return [dd(x.date),esc(x.client),esc(x.proj),esc(x.sup),fq(x.qty),fmt(perT(x.buy,x.qty)),fmt(perT(x.sale,x.qty)),
+      `<span class="${cls(df)}">${fmt(perT(df,x.qty))}</span>`,`<span class="${cls(df)}"><b>${fmt(df)}</b></span>`]}),
+    ['الإجمالي','','','',fq(qty),fmt(perT(buy,qty)),fmt(perT(sale,qty)),fmt(perT(diff,qty)),fmt(diff)]);
+}
+function exportPrices(){
+  if(typeof XLSX==='undefined'){alert('مكتبة Excel مش اتحملت — اتأكد من الاتصال بالإنترنت وحدّث الصفحة.');return}
+  const d=priceRows().slice().sort((a,b)=>(a.date||0)-(b.date||0)||a.rn-b.rn);
+  const aoa=[['التاريخ','العميل','المشروع','المورد','الكمية','سعر الشراء/طن','سعر البيع/طن','الفرق/طن','إجمالي الفرق'],
+    ...d.map(x=>[iso(x.date),x.client,x.proj,x.sup,r6(x.qty),r6(perT(x.buy,x.qty)),r6(perT(x.sale,x.qty)),r6(perT(x.sale-x.buy,x.qty)),Math.round(x.sale-x.buy)]),
+    ['الإجمالي','','','',r6(sum(d,x=>x.qty)),'','','',Math.round(sum(d,x=>x.sale-x.buy))]];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:12},{wch:24},{wch:14},{wch:18},{wch:10},{wch:14},{wch:14},{wch:12},{wch:14}];
+  const wb=XLSX.utils.book_new();wb.Workbook={Views:[{RTL:true}]};XLSX.utils.book_append_sheet(wb,ws,'الأسعار والفرق');
+  XLSX.writeFile(wb,'تقرير_الأسعار_والفرق_'+iso(new Date())+'.xlsx');
+}
 function exportDebts(){
   if(typeof XLSX==='undefined'){alert('مكتبة Excel مش اتحملت — اتأكد من الاتصال بالإنترنت وحدّث الصفحة.');return}
   const aoa=[['العميل','التليفون','إجمالي المبيعات','الكمية','المدفوع','المتبقي','الحد الائتماني','استخدام الحد %','تعدّى الحد؟','نسبة السداد %','آخر عملية بيع','عمر أقدم فاتورة مفتوحة (يوم)','0-30','31-60','61-90','+90'],
@@ -909,6 +968,7 @@ function parseTrans(h,rows,rn){
   const miss=[['اسم الشركة',iCo],['الكمية',iQ],['النولون',iFr],['نسبة الشريك',iPa],['سعر الطن',iTo]].filter(x=>x[1]<0).map(x=>x[0]);
   if(miss.length)throw new Error('مش لاقي أعمدة النقل ('+miss.join('، ')+') — اتأكد إن الـ Apps Script بيرجّع تبويب النقل وإن أسماء الأعمدة في التبويب زي ما هي.');
   TRANS=[];TPAY=[];TR_FIXED=0;
+  DATE_MDY=detectMdy(rows.map(r=>r[iD]));
   rows.forEach((r,idx)=>{
     const g=i=>i>=0?r[i]:'';
     const ty=nz(g(iTy));
@@ -1190,6 +1250,7 @@ function parseExp(h,rows,rn){
   const miss=[['الجهة',iE],['المبلغ',iA]].filter(x=>x[1]<0).map(x=>x[0]);
   if(miss.length)throw new Error('مش لاقي أعمدة المصروفات ('+miss.join('، ')+') — اتأكد إن الـ Apps Script بيرجّع تاب المصروفات وإن أسماء الأسئلة في الفورم زي ما هي.');
   EXP=[];
+  DATE_MDY=detectMdy(rows.map(r=>iD>=0?r[iD]:''));
   rows.forEach((r,idx)=>{
     const amt=num(r[iA]),ent=key(r[iE]);
     if(!amt&&!ent)return;
@@ -1284,6 +1345,7 @@ function toggleTheme(){
 })();
 ['fFrom','fTo'].forEach(id=>$(id).onchange=()=>{markPreset('');render()});
 ['fProj','fSup'].forEach(id=>$(id).onchange=render);
+$('priceSearch').oninput=renderPrices;
 $('presets').onclick=e=>{const b=e.target.closest('.pill');if(b)setPreset(b.dataset.p)};
 $('search').oninput=renderDebt;$('onlyDebt').onchange=renderDebt;
 $('tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
